@@ -1,0 +1,8 @@
+# Ignorer tous les fichiers
+*.txt
+
+# Ne pas ignorer les dossiers (sinon Git perd la structure)
+!*/
+
+# Ne pas ignorer ce fichier précis (à la racine)
+#!Livrable_1_Algorithmique_FISEA3INFO.ipynb
