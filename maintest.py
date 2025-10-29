@@ -185,7 +185,7 @@ def cout_total(routes, coords, metric="euclidienne"):
     total = 0.0
     for route in routes:
         if not route or len(route) < 2:
-            continuea
+            continue
         i = 0
         while i < len(route) - 1:
             u = route[i]
@@ -622,19 +622,6 @@ def refroidissement(T, params):
         T = max(1e-12, params.get("alpha", 0.995) * T)
     return T
 
-def alns_step(state, T, params, scores):
-    """
-    Appelle cooling uniquement si nécessaire (selon où tu veux le mettre)
-    """
-    # TODO 1 : Vérifier si le refroidissement a déjà été appliqué dans appli_acceptation
-    if params.get("accept_mode", "sa") == "sa":
-        T = refroidissement(T, params)
-    # TODO 2 : Si non, appliquer cooling(T, params)
-    if params.get("accept_mode", "sa") != "sa":
-        T = refroidissement(T, params) 
-    # TODO 3 : Retourner éventuellement la nouvelle température
-    return T
-
 def random_removal(routes, coords, q=2, metric="manhattan"):
     """
     Retire aléatoirement q clients (hors dépôts) de l'ensemble des routes.
@@ -966,13 +953,13 @@ state_final = alns(
     initial_routes=routes,
     coords=coords,
     metric="euclidienne",  # métrique euclidienne pour meilleurs résultats
-    n_iter=10000, # beaucoup plus d'itérations
+    n_iter=100, # beaucoup plus d'itérations
     q_remove=4,   # destruction agressive
     demandes=lire_demandes(choix_fichier),
     capacite=lire_capacite(choix_fichier),
     contraintes=None,
     seed=42,
-    log_every=1000
+    log_every=1
 )
 
 print("Coût final       :", state_final["C"])
