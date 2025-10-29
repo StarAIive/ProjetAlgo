@@ -554,13 +554,13 @@ def init_scores_et_param(remove_ops, insert_ops):
     scores = {
         "remove": {},
         "insert": {},
-        "pi": {  # barèmes très agressifs pour favoriser les bonnes découvertes
-            "best_global": 20.0,  # récompense très élevée pour les meilleures solutions
-            "improve": 10.0,      # récompense élevée pour les améliorations
-            "accepted_worse": 2.0 # récompense pour diversification
+        "pi": {  # barèmes ultra-agressifs pour favoriser les bonnes découvertes
+            "best_global": 50.0,  # récompense maximale pour les meilleures solutions
+            "improve": 25.0,      # récompense très élevée pour les améliorations
+            "accepted_worse": 3.0 # récompense modérée pour diversification
         },
-        "rho": 0.4,          # mise à jour très agressive des poids
-        "segment_len": 80,   # segments plus courts pour adaptation rapide
+        "rho": 0.5,          # mise à jour ultra-agressive des poids
+        "segment_len": 50,   # segments plus courts pour adaptation très rapide
         "iters_in_segment": 0
     }
 
@@ -571,7 +571,7 @@ def init_scores_et_param(remove_ops, insert_ops):
 
     params = {
         "accept_mode": "sa",   # 'sa' | 'improve_only' | 'threshold'
-        "alpha": 0.998,        # refroidissement plus lent pour plus d'exploration
+        "alpha": 0.9995,       # refroidissement ultra-lent pour exploration prolongée
         "epsilon": 0.0         # seuil pour mode 'threshold'
     }
 
@@ -672,6 +672,65 @@ def random_removal(routes, coords, q=2, metric="manhattan"):
 
     return new_routes, removed
 
+def shaw_removal(routes, coords, q=2, metric="euclidienne"):
+    """
+    Shaw removal : retire q clients similaires (proches géographiquement).
+    Plus efficace pour les grandes instances.
+    """
+    # Collecter dépôts
+    depots = set()
+    for r in routes:
+        if r:
+            depots.add(r[0]); depots.add(r[-1])
+
+    # Lister tous les clients retirables (non dépôts)
+    pool = []
+    for route in routes:
+        for i in range(1, len(route) - 1):
+            if route[i] not in depots:
+                pool.append(route[i])
+
+    if not pool or q <= 0:
+        return [rt[:] for rt in routes], []
+
+    # Choisir un client de départ aléatoirement
+    seed_client = random.choice(pool)
+    removed = [seed_client]
+    
+    # Ajouter les q-1 clients les plus proches du seed
+    while len(removed) < q and len(removed) < len(pool):
+        best_dist = float("inf")
+        best_client = None
+        
+        for client in pool:
+            if client not in removed:
+                # Distance minimale au cluster déjà sélectionné
+                min_dist_to_cluster = min(
+                    math.hypot(coords[client][0] - coords[selected][0],
+                              coords[client][1] - coords[selected][1])
+                    for selected in removed
+                )
+                
+                if min_dist_to_cluster < best_dist:
+                    best_dist = min_dist_to_cluster
+                    best_client = client
+        
+        if best_client is not None:
+            removed.append(best_client)
+        else:
+            break
+
+    # Construire les nouvelles routes
+    new_routes = []
+    for route in routes:
+        new_route = []
+        for client in route:
+            if (client in depots) or (client not in removed):
+                new_route.append(client)
+        new_routes.append(new_route)
+
+    return new_routes, removed
+
 def selection_de_scores(scores):
     """
     Construit les distributions de poids à partir de `scores` et sélectionne
@@ -689,38 +748,49 @@ def selection_de_scores(scores):
 
 
     # Tirage par roulette (pondéré)
-    # Si tu as déjà `selection_op(poids_destruction, poids_reparation)`, tu peux l'utiliser :
 
-    op_remove, op_insert = selection_op(w_remove, w_insert)  # ta version
+    op_remove, op_insert = selection_op(w_remove, w_insert) 
     return op_remove, op_insert
 
-def optimisation_2opt(routes, coords, metric="manhattan"):
+def optimisation_2opt(routes, coords, metric="euclidienne"):
     """
-    Applique l'optimisation 2-opt sur chaque route individuellement.
+    Applique l'optimisation 2-opt améliorée sur chaque route individuellement.
     """
     improved_routes = []
     
     for route in routes:
-        if len(route) <= 3:  # route trop courte pour 2-opt
+        if len(route) <= 4:  # route trop courte pour 2-opt efficace
             improved_routes.append(route[:])
             continue
             
         best_route = route[:]
-        best_cost = cout_total([best_route], coords, metric)
         improved = True
+        max_iterations = 5  # limite pour éviter la stagnation
+        iteration = 0
         
-        while improved:
+        while improved and iteration < max_iterations:
             improved = False
+            iteration += 1
+            
+            # Calcul incrémental des gains pour éviter recalculs coûteux
             for i in range(1, len(best_route) - 2):
-                for j in range(i + 1, len(best_route) - 1):
-                    # Créer nouvelle route avec 2-opt
-                    new_route = best_route[:]
-                    new_route[i:j+1] = reversed(new_route[i:j+1])
+                for j in range(i + 2, min(i + 20, len(best_route) - 1)):  # limite voisinage
+                    # Calcul du gain 2-opt directement
+                    x1, y1 = coords[best_route[i-1]]
+                    x2, y2 = coords[best_route[i]]
+                    x3, y3 = coords[best_route[j]]
+                    x4, y4 = coords[best_route[j+1]]
                     
-                    new_cost = cout_total([new_route], coords, metric)
-                    if new_cost < best_cost:
-                        best_route = new_route
-                        best_cost = new_cost
+                    if metric == "manhattan":
+                        old_cost = (abs(x1-x2) + abs(y1-y2)) + (abs(x3-x4) + abs(y3-y4))
+                        new_cost = (abs(x1-x3) + abs(y1-y3)) + (abs(x2-x4) + abs(y2-y4))
+                    else:
+                        old_cost = math.hypot(x1-x2, y1-y2) + math.hypot(x3-x4, y3-y4)
+                        new_cost = math.hypot(x1-x3, y1-y3) + math.hypot(x2-x4, y2-y4)
+                    
+                    if new_cost < old_cost:  # Amélioration trouvée
+                        # Appliquer le 2-opt
+                        best_route[i:j+1] = reversed(best_route[i:j+1])
                         improved = True
                         break
                 if improved:
@@ -748,15 +818,14 @@ def alns(initial_routes, coords,
         random.seed(seed)
 
     # Opérateurs disponibles - ajout de diversité
-    remove_ops = ["worst", "random"]
+    remove_ops = ["worst", "random", "shaw"]
     insert_ops = ["greedy", "best"]
 
     # Init scores & params (tes fonctions déjà corrigées)
     scores, params = init_scores_et_param(remove_ops, insert_ops)
 
-    # Température initiale (si non déjà fournie dans params)
-    T = 100.0  # température très élevée pour exploration maximale
-    # (appli_acceptation fait le cooling si mode 'sa')
+    # Température initiale
+    T = 200.0 
 
     # État courant
     S0 = []
@@ -778,6 +847,8 @@ def alns(initial_routes, coords,
             worst_removal(routes, coords, q=q, metric=metric),
         "random": lambda routes, coords, q, metric:
             random_removal(routes, coords, q=q, metric=metric),
+        "shaw": lambda routes, coords, q, metric:
+            shaw_removal(routes, coords, q=q, metric=metric),
     }
     repair_funcs = {
         "greedy": lambda routes_partial, removed, coords, metric, **kw:
@@ -807,8 +878,8 @@ def alns(initial_routes, coords,
             demandes=demandes, capacite=capacite, contraintes=contraintes
         )
 
-        # Optimisation locale périodique (2-opt toutes les 200 itérations)
-        if it % 200 == 0:
+        # Optimisation locale périodique (2-opt toutes les 100 itérations)
+        if it % 100 == 0:
             optimized_routes = optimisation_2opt(state["S"], coords, metric)
             optimized_cost = cout_total(optimized_routes, coords, metric)
             
@@ -953,13 +1024,13 @@ state_final = alns(
     initial_routes=routes,
     coords=coords,
     metric="euclidienne",  # métrique euclidienne pour meilleurs résultats
-    n_iter=100, # beaucoup plus d'itérations
-    q_remove=4,   # destruction agressive
+    n_iter=20000, # beaucoup plus d'itérations pour grandes instances
+    q_remove=6,   # destruction encore plus agressive
     demandes=lire_demandes(choix_fichier),
     capacite=lire_capacite(choix_fichier),
     contraintes=None,
     seed=42,
-    log_every=1
+    log_every=2000
 )
 
 print("Coût final       :", state_final["C"])
