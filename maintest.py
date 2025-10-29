@@ -554,13 +554,13 @@ def init_scores_et_param(remove_ops, insert_ops):
     scores = {
         "remove": {},
         "insert": {},
-        "pi": {  # barèmes ultra-agressifs pour favoriser les bonnes découvertes
-            "best_global": 50.0,  # récompense maximale pour les meilleures solutions
-            "improve": 25.0,      # récompense très élevée pour les améliorations
-            "accepted_worse": 3.0 # récompense modérée pour diversification
+        "pi": {  
+            "best_global": 50.0,  
+            "improve": 25.0,     
+            "accepted_worse": 3.0
         },
-        "rho": 0.5,          # mise à jour ultra-agressive des poids
-        "segment_len": 50,   # segments plus courts pour adaptation très rapide
+        "rho": 0.5,          
+        "segment_len": 50,   
         "iters_in_segment": 0
     }
 
@@ -570,9 +570,9 @@ def init_scores_et_param(remove_ops, insert_ops):
         scores["insert"][op] = {"score": 0.0, "uses": 0, "weight": 1.0}
 
     params = {
-        "accept_mode": "sa",   # 'sa' | 'improve_only' | 'threshold'
-        "alpha": 0.9995,       # refroidissement ultra-lent pour exploration prolongée
-        "epsilon": 0.0         # seuil pour mode 'threshold'
+        "accept_mode": "sa",  
+        "alpha": 0.9995,      
+        "epsilon": 0.0 
     }
 
     return scores, params
@@ -821,7 +821,7 @@ def alns(initial_routes, coords,
     remove_ops = ["worst", "random", "shaw"]
     insert_ops = ["greedy", "best"]
 
-    # Init scores & params (tes fonctions déjà corrigées)
+    # Init scores & params
     scores, params = init_scores_et_param(remove_ops, insert_ops)
 
     # Température initiale
@@ -871,7 +871,7 @@ def alns(initial_routes, coords,
             it += 1
             continue
 
-        # Une itération ALNS (ta fonction)
+        # Une itération ALNS 
         state, T, scores, outcome = alns_iteration(
             state, coords, metric, T, params, scores,
             op_remove, op_insert, remove_func, repair_func, q_remove,
@@ -1023,9 +1023,9 @@ tracemalloc.start()
 state_final = alns(
     initial_routes=routes,
     coords=coords,
-    metric="euclidienne",  # métrique euclidienne pour meilleurs résultats
-    n_iter=20000, # beaucoup plus d'itérations pour grandes instances
-    q_remove=6,   # destruction encore plus agressive
+    metric="euclidienne", 
+    n_iter=20000,
+    q_remove=6,   
     demandes=lire_demandes(choix_fichier),
     capacite=lire_capacite(choix_fichier),
     contraintes=None,
