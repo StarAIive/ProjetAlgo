@@ -1,0 +1,886 @@
+import os
+import glob
+import math
+import matplotlib.pyplot as plt
+import random
+import time
+import tracemalloc
+
+choix = None
+while choix != 0 and choix != 1:
+    try:
+        print("Choisissez le mode de test :")
+        print("0 -> Tester le code de base (VRP standard)")
+        print("1 -> Tester le code avec 2 contraintes supplémentaires")
+        choix = int(input("Votre choix (0 ou 1) : "))
+        if choix != 0 and choix != 1:
+            print("Erreur : veuillez entrer 0 ou 1.")
+    except ValueError:
+        print(" Entrée invalide : veuillez entrer un nombre entier (0 ou 1).")
+
+print(f"Mode sélectionné : {choix}")
+
+if choix == 0:
+    dossier = "data"
+    fichiers_vrp = glob.glob(os.path.join(dossier, "*.vrp"))
+    if not fichiers_vrp:
+        print("Aucun fichier .vrp trouvé dans le dossier data/")
+        raise SystemExit
+
+    print("Fichiers .vrp disponibles :")
+    idx = 1
+    for fp in fichiers_vrp:
+        print(f"{idx} - {os.path.basename(fp)}")
+        idx += 1
+
+    while True:
+        try:
+            k = int(input(f"\nChoisissez un fichier (1-{len(fichiers_vrp)}) : "))
+            if 1 <= k <= len(fichiers_vrp):
+                choix_fichier = fichiers_vrp[k - 1]
+                nom_fichier = os.path.basename(choix_fichier)
+                break
+            else:
+                print(f"Erreur : veuillez entrer un nombre entre 1 et {len(fichiers_vrp)}")
+        except ValueError:
+            print("Erreur : veuillez entrer un nombre valide")
+    print(f"\nFichier sélectionné : {nom_fichier}")
+else:
+    print("Mode 1 (contraintes supplémentaires) : non implémenté pour l’instant.")
+    raise SystemExit
+
+def lire_coordonnees(fichier):
+    coords = {}
+    with open(fichier, "r") as f:
+        lignes = f.readlines()
+    n = len(lignes)
+    i = 0
+    while i < n and "NODE_COORD_SECTION" not in lignes[i]:
+        i += 1
+    if i == n:
+        return coords
+    i += 1
+    while i < n and "DEMAND_SECTION" not in lignes[i] and "DEPOT_SECTION" not in lignes[i] and "EOF" not in lignes[i]:
+        parts = lignes[i].split()
+        if len(parts) >= 3:
+            numero = int(parts[0])
+            x = float(parts[1])
+            y = float(parts[2])
+            coords[numero] = (x, y)
+        i += 1
+    return coords
+
+def lire_depots(fichier):
+    depots = []
+    with open(fichier, "r") as f:
+        lignes = f.readlines()
+    n = len(lignes)
+    i = 0
+    while i < n and "DEPOT_SECTION" not in lignes[i]:
+        i += 1
+    if i == n:
+        return depots
+    i += 1
+    while i < n:
+        line = lignes[i].strip()
+        if line == "-1" or line == "EOF" or line == "":
+            break
+        depots.append(int(line.split()[0]))
+        i += 1
+    return depots
+
+def lire_demandes(fichier):
+    demandes = {}
+    with open(fichier, "r") as f:
+        lignes = f.readlines()
+    n = len(lignes)
+    i = 0
+    while i < n and "DEMAND_SECTION" not in lignes[i]:
+        i += 1
+    if i == n:
+        return demandes
+    i += 1
+    while i < n:
+        line = lignes[i].strip()
+        if line == "-1" or line == "EOF" or line.startswith("DEPOT_SECTION"):
+            break
+        parts = line.split()
+        if len(parts) >= 2:
+            numero = int(parts[0])
+            demande = int(parts[1])
+            demandes[numero] = demande
+        i += 1
+    return demandes
+
+def lire_capacite(fichier):
+    with open(fichier, "r") as f:
+        lignes = f.readlines()
+    for line in lignes:
+        if "CAPACITY" in line:
+            parts = line.split(":")
+            if len(parts) >= 2:
+                try:
+                    return int(parts[1].strip())
+                except ValueError:
+                    return None
+    return None
+
+def solution_initiale(fichier):
+    coords = lire_coordonnees(fichier)
+    depots = lire_depots(fichier)
+    demandes = lire_demandes(fichier)
+    capacite = lire_capacite(fichier)
+    if not depots:
+        print("Aucun dépôt trouvé.")
+        return []
+    depot = depots[0]
+
+    clients = []
+    for i in coords.keys():
+        est_depot = False
+        for d in depots:
+            if i == d:
+                est_depot = True
+                break
+        if not est_depot:
+            clients.append(i)
+
+    tour = [depot]
+    p = 0
+    demande = 0
+    while p < len(clients):
+        if clients[p] in demandes:
+            demande += demandes[clients[p]]
+            if capacite is not None and demande > capacite:
+                tour.append(depot)
+                demande = 0
+            else:
+                tour.append(clients[p])
+                p += 1
+    tour.append(depot)
+    routes = []
+    courants = []
+    i = 0
+    n = len(tour)
+    while i < n:
+        v = tour[i]
+        if v == depot:
+            if len(courants) > 0:
+                # on close la route: [depot] + clients + [depot]
+                route = [depot]
+                j = 0
+                while j < len(courants):
+                    route.append(courants[j])
+                    j += 1
+                route.append(depot)
+                routes.append(route)
+                courants = []
+            # sinon: dépôt isolé -> on ignore (c'est juste une frontière)
+        else:
+            courants.append(v)
+        i += 1
+    return routes
+
+def cout_total(routes, coords, metric="euclidienne"):
+    total = 0.0
+    for route in routes:
+        if not route or len(route) < 2:
+            continuea
+        i = 0
+        while i < len(route) - 1:
+            u = route[i]
+            v = route[i + 1]
+            x1, y1 = coords[u]
+            x2, y2 = coords[v]
+            if metric == "manhattan":
+                dist = abs(x1 - x2) + abs(y1 - y2)
+            else: 
+                dist = math.hypot(x1 - x2, y1 - y2)
+            total += dist
+            i += 1
+    return total
+
+def selection_op(poids_destruction, poids_reparation):
+    """
+    Sélectionne un opérateur de destruction et un opérateur de réparation 
+    via un tirage à la roulette pondérée.
+    
+    Paramètres
+    ----------
+    poids_destruction : dict
+        Exemple : {"random": 1, "worst": 1}
+    poids_reparation : dict
+        Exemple : {"greedy": 1, "best": 1}
+
+    Retour
+    ------
+    op_destruct : str
+    op_repare : str
+    """
+    
+    # TODO 1 : Générer une probabilité pour chaque opérateur de destruction à partir des poids
+    total = sum(poids_destruction.values())
+    proba_destruction = {k: v / total for k, v in poids_destruction.items()}
+
+    # Tirer un opérateur de destruction selon la probabilité calculée
+    op_destruct = random.choices(list(proba_destruction.keys()), weights=list(proba_destruction.values()))[0]
+
+    # Générer une probabilité pour chaque opérateur de réparation à partir des poids
+    total = sum(poids_reparation.values())
+    proba_reparation = {k: v / total for k, v in poids_reparation.items()}
+
+    # Tirer un opérateur de réparation selon la probabilité calculée
+    op_repare = random.choices(list(proba_reparation.keys()), weights=list(proba_reparation.values()))[0]
+
+    return op_destruct, op_repare
+
+def worst_removal(routes, coords, q=2, metric="manhattan"):
+    """
+    Retire q clients impliqués dans les arêtes les plus coûteuses (Worst Removal - ALNS)
+    en évitant les dépôts.
+    """
+    # Déterminer les dépôts présents dans la solution (tête/fin de chaque route)
+    depot_ids = set()
+    for route in routes:
+        if route:
+            depot_ids.add(route[0])
+            depot_ids.add(route[-1])
+
+    # Lister toutes les arêtes (u,v) en ignorant celles qui touchent un dépôt
+    edges = []
+    for route in routes:
+        n = len(route)
+        i = 0
+        while i < n - 1:
+            u = route[i]
+            v = route[i + 1]
+            if (u not in depot_ids) and (v not in depot_ids):
+                edges.append((u, v))
+            i += 1
+
+    # Calculer le coût de chaque arête
+    costs = []
+    for (u, v) in edges:
+        x1, y1 = coords[u]
+        x2, y2 = coords[v]
+        if metric == "manhattan":
+            dist = abs(x1 - x2) + abs(y1 - y2)
+        else:
+            dist = math.hypot(x1 - x2, y1 - y2)
+        costs.append((u, v, dist))
+
+    # Trier par coût décroissant
+    costs.sort(key=lambda t: t[2], reverse=True)
+
+    # Sélectionner jusqu'à q clients (non dépôts), uniques, en parcourant les pires arêtes
+    clients_a_retirer = []
+    for (u, v, _) in costs:
+        if u not in depot_ids and (u not in clients_a_retirer):
+            clients_a_retirer.append(u)
+            if len(clients_a_retirer) >= q:
+                break
+        if v not in depot_ids and (len(clients_a_retirer) < q) and (v not in clients_a_retirer):
+            clients_a_retirer.append(v)
+            if len(clients_a_retirer) >= q:
+                break
+
+    # Si q > clients disponibles, délimiter la liste
+    if len(clients_a_retirer) > q:
+        clients_a_retirer = clients_a_retirer[:q]
+
+    # Retirer ces clients des routes (en conservant l'ordre et en préservant les dépôts)
+    new_routes = []
+    for route in routes:
+        new_route = []
+        for client in route:
+            if (client in depot_ids) or (client not in clients_a_retirer):
+                new_route.append(client)
+        new_routes.append(new_route)
+
+    return new_routes, clients_a_retirer
+
+def delta_insertion(route, idx, node, coords, metric="manhattan"):
+    """
+    Δ = d(a,node) + d(node,b) - d(a,b), avec a = route[idx], b = route[idx+1]
+    """
+    a = route[idx]
+    b = route[idx + 1]
+    ax, ay = coords[a]; nx, ny = coords[node]; bx, by = coords[b]
+
+    if metric == "manhattan":
+        delta = (abs(ax - nx) + abs(ay - ny)) + (abs(nx - bx) + abs(ny - by)) - (abs(ax - bx) + abs(ay - by))
+    else:
+        delta = (math.hypot(ax - nx, ay - ny) + math.hypot(nx - bx, ny - by) - math.hypot(ax - bx, ay - by))
+
+    return delta
+
+
+def insertion_faisable(route, idx, node, demandes=None, capacite=None, contraintes=None):
+    """
+    Faisabilité minimale : capacité par route (les dépôts sont aux extrémités).
+    """
+    if demandes is not None and capacite is not None:
+        charge = 0
+        i = 1
+        while i < len(route) - 1:  # ignorer dépôts
+            client = route[i]
+            charge += demandes.get(client, 0)
+            i += 1
+        charge += demandes.get(node, 0)
+        if charge > capacite:
+            return False
+
+    # (extensions TW/compatibilité plus tard via `contraintes`)
+    return True
+
+
+def greedy_insertion_once(routes, node, coords, metric="manhattan",
+                          demandes=None, capacite=None, contraintes=None):
+    """
+    Insère `node` à la meilleure position (Δ minimal) sur l’ensemble des routes.
+    """
+    delta_best = float("inf")
+    choix_best = (None, None)  # (r_idx, idx)
+
+    # Recherche du meilleur emplacement faisable
+    r_idx = 0
+    while r_idx < len(routes):
+        route = routes[r_idx]
+        i = 0
+        while i < len(route) - 1:
+            if insertion_faisable(route, i, node, demandes, capacite, contraintes):
+                delta = delta_insertion(route, i, node, coords, metric)
+                if delta < delta_best:
+                    delta_best = delta
+                    choix_best = (r_idx, i)
+            i += 1
+        r_idx += 1
+
+    # Aucun placement faisable trouvé
+    if choix_best == (None, None):
+        return routes, float("inf"), False
+
+    # Appliquer l’insertion
+    r, i = choix_best
+    routes[r].insert(i + 1, node)
+    return routes, delta_best, True
+
+
+def repair_greedy(routes_partial, removed, coords, metric="manhattan",
+                  demandes=None, capacite=None, contraintes=None, ordre="as_is"):
+    """
+    Réinsère toutes les villes de `removed` en mode Greedy (Δ minimal successif).
+    """
+    # Copie de travail
+    routes_modifiees = [rt[:] for rt in routes_partial]
+    delta_total = 0.0
+    non_inseres = []
+
+    ordre_effectif = list(removed)
+
+    for u in ordre_effectif:
+        routes_modifiees, delta, ok = greedy_insertion_once(
+            routes_modifiees, u, coords, metric,
+            demandes=demandes, capacite=capacite, contraintes=contraintes
+        )
+        if ok:
+            delta_total += (0.0 if delta is None else delta)
+        else:
+            non_inseres.append(u)
+
+    return routes_modifiees, non_inseres, delta_total
+
+def acceptance_rule(delta, T, mode="sa", epsilon=0.0):
+    """
+    Décide si on accepte une solution candidate (delta = C(S') - C(S)).
+    """
+    # 1) Toute amélioration est acceptée
+    if delta < 0:
+        return True
+
+    # 2) Modes d'acceptation
+    if mode == "sa":
+        # Garde-fou pour éviter division par 0 ou T très petit
+        if T is None or T <= 1e-12:
+            return False
+        prob = math.exp(-delta / T)
+        return random.random() < prob
+
+    elif mode == "improve_only":
+        return False
+
+    elif mode == "threshold":
+        return delta <= epsilon
+
+    # Par défaut : refuser
+    return False
+
+def apply_acceptance(state, candidate, selected_ops, T, params, scores):
+    """
+    Applique acceptation/rejet + met à jour S/C, best global, T, et les crédits opérateurs.
+    """
+    C_cur = state["C"]
+    C_new = candidate["C_new"]
+    delta = C_new - C_cur
+
+    # Décision d'acceptation
+    accept = acceptance_rule(
+        delta, 
+        T, 
+        mode=params.get("accept_mode", "sa"), 
+        epsilon=params.get("epsilon", 0.0)
+    )
+
+    op_remove, op_insert = selected_ops
+
+    if not accept:
+        # Rejet : on crédite juste les 'uses'
+        scores["remove"][op_remove]["uses"] += 1
+        scores["insert"][op_insert]["uses"] += 1
+
+        # Refroidissement éventuel
+        if params.get("accept_mode", "sa") == "sa":
+            T = params.get("alpha", 0.995) * T
+
+        # Mise à jour par segment (incrément du compteur + éventuel update des poids)
+        scores["iters_in_segment"] += 1
+        if scores["iters_in_segment"] >= scores["segment_len"]:
+            rho = scores["rho"]
+            for fam in ["remove", "insert"]:
+                for op, data in scores[fam].items():
+                    w_old = data["weight"]
+                    uses = max(1, data["uses"])
+                    sc = data["score"]
+                    data["weight"] = (1 - rho) * w_old + rho * (sc / uses)
+                    data["score"] = 0.0
+                    data["uses"] = 0
+            scores["iters_in_segment"] = 0
+
+        return state, T, scores, "rejected"
+
+    # Accepté : on met à jour l'état courant
+    new_state = {
+        "S": candidate["S_new"],
+        "C": C_new,
+        "S_best": state["S_best"],
+        "C_best": state["C_best"]
+    }
+
+    # Outcome + meilleur global éventuel
+    if C_new < state["C_best"]:
+        new_state["S_best"] = candidate["S_new"]
+        new_state["C_best"] = C_new
+        outcome = "best_global"
+    elif delta < 0:
+        outcome = "improve"
+    else:
+        outcome = "accepted_worse"
+
+    # Créditer opérateurs (score + uses) — remove ET insert
+    pi = scores["pi"]
+    credit = pi.get(outcome, 0.0)
+    scores["remove"][op_remove]["score"] += credit
+    scores["remove"][op_remove]["uses"] += 1
+    scores["insert"][op_insert]["score"] += credit
+    scores["insert"][op_insert]["uses"] += 1
+
+    # Refroidissement éventuel
+    if params.get("accept_mode", "sa") == "sa":
+        T = params.get("alpha", 0.995) * T
+
+    # Mise à jour par segment (incrément du compteur + éventuel update des poids)
+    scores["iters_in_segment"] += 1
+    if scores["iters_in_segment"] >= scores["segment_len"]:
+        rho = scores["rho"]
+        for fam in ["remove", "insert"]:
+            for op, data in scores[fam].items():
+                w_old = data["weight"]
+                uses = max(1, data["uses"])
+                sc = data["score"]
+                data["weight"] = (1 - rho) * w_old + rho * (sc / uses)
+                data["score"] = 0.0
+                data["uses"] = 0
+        scores["iters_in_segment"] = 0
+
+    return new_state, T, scores, outcome
+
+
+def init_scores_and_params(remove_ops, insert_ops):
+    """
+    Initialise les structures de scores/poids + paramètres d’acceptation.
+    """
+    scores = {
+        "remove": {},
+        "insert": {},
+        "pi": {  # barèmes
+            "best_global": 5.0,
+            "improve": 2.0,
+            "accepted_worse": 0.5
+        },
+        "rho": 0.2,
+        "segment_len": 50,
+        "iters_in_segment": 0
+    }
+
+    for op in remove_ops:
+        scores["remove"][op] = {"score": 0.0, "uses": 0, "weight": 1.0}
+    for op in insert_ops:
+        scores["insert"][op] = {"score": 0.0, "uses": 0, "weight": 1.0}
+
+    params = {
+        "accept_mode": "sa",   # 'sa' | 'improve_only' | 'threshold'
+        "alpha": 0.995,        # refroidissement
+        "epsilon": 0.0         # seuil pour mode 'threshold'
+    }
+
+    return scores, params
+
+
+def alns_iteration(state, coords, metric, T, params, scores,
+                   op_remove, op_repair, remove_func, repair_func, q_remove,
+                   demandes=None, capacite=None, contraintes=None):
+    """
+    Orchestration d'une itération ALNS :
+    - destruction -> réparation -> coût -> acceptation -> MAJ T/poids
+    `remove_func` et `repair_func` sont des fonctions OPÉRATEUR-SPÉCIFIQUES.
+    """
+
+    # Destruction
+    routes_partial, removed = remove_func(
+        state["S"], coords, q_remove, metric
+    )
+
+    # Réparation 
+    routes_candidate, non_inseres, _ = repair_func(
+        routes_partial, removed, coords, metric,
+        demandes=demandes, capacite=capacite, contraintes=contraintes
+    )
+
+    if non_inseres:
+        return state, T, scores, "rejected"
+
+    #Coût candidat
+    C_new = cout_total(routes_candidate, coords, metric)
+
+    # Candidate dict
+    candidate = {"S_new": routes_candidate, "C_new": C_new}
+
+    # Acceptation + MAJ T/scores/poids
+    new_state, T, scores, outcome = apply_acceptance(
+        state, candidate, (op_remove, op_repair), T, params, scores
+    )
+
+    return new_state, T, scores, outcome
+
+def refroidissement(T, params):
+    """
+    Refroidissement simple : T <- alpha * T (simulated annealing)
+    """
+    if params.get("accept_mode", "sa") == "sa":
+        T = max(1e-12, params.get("alpha", 0.995) * T)
+    return T
+
+def alns_step(state, T, params, scores):
+    """
+    Appelle cooling uniquement si nécessaire (selon où tu veux le mettre)
+    """
+    # TODO 1 : Vérifier si le refroidissement a déjà été appliqué dans apply_acceptance
+    if params.get("accept_mode", "sa") == "sa":
+        T = refroidissement(T, params)
+    # TODO 2 : Si non, appliquer cooling(T, params)
+    if params.get("accept_mode", "sa") != "sa":
+        T = refroidissement(T, params) 
+    # TODO 3 : Retourner éventuellement la nouvelle température
+    return T
+
+# =========================
+# Opérateur de destruction : Random Removal (simple, VRP-safe)
+# =========================
+def random_removal(routes, coords, q=2, metric="manhattan"):
+    """
+    Retire aléatoirement q clients (hors dépôts) de l'ensemble des routes.
+    Retourne (routes_partial, removed).
+    """
+    # 1) Collecter dépôts (tête/fin de chaque route)
+    depots = set()
+    for r in routes:
+        if r:
+            depots.add(r[0]); depots.add(r[-1])
+
+    # 2) Lister tous les clients retirables (non dépôts)
+    pool = []
+    r_idx = 0
+    while r_idx < len(routes):
+        route = routes[r_idx]
+        i = 1
+        while i < len(route) - 1:
+            pool.append(route[i])
+            i += 1
+        r_idx += 1
+
+    if not pool:
+        return [rt[:] for rt in routes], []
+
+    # 3) Échantillonner sans remise au plus q
+    k = min(q, len(pool))
+    removed = random.sample(pool, k)
+
+    # 4) Construire les nouvelles routes (on enlève removed, on garde dépôts)
+    new_routes = []
+    r_idx = 0
+    while r_idx < len(routes):
+        route = routes[r_idx]
+        new_r = []
+        j = 0
+        while j < len(route):
+            v = route[j]
+            if (v in depots) or (v not in removed):
+                new_r.append(v)
+            j += 1
+        new_routes.append(new_r)
+        r_idx += 1
+
+    return new_routes, removed
+
+
+# =========================
+# Sélection d’opérateurs via les poids courants (scores)
+# =========================
+def selection_from_scores(scores):
+    """
+    Construit les distributions de poids à partir de `scores` et sélectionne
+    (op_remove, op_insert) par tirage pondéré.
+    Si `selection_op(...)` existe déjà chez toi, tu peux la remplacer ici.
+    """
+    # Tables de poids
+    w_remove = {op: data["weight"] for op, data in scores["remove"].items()}
+    w_insert = {op: data["weight"] for op, data in scores["insert"].items()}
+
+    # Tirage par roulette (pondéré)
+    # Si tu as déjà `selection_op(poids_destruction, poids_reparation)`, tu peux l'utiliser :
+    try:
+        op_remove, op_insert = selection_op(w_remove, w_insert)  # ta version
+        return op_remove, op_insert
+    except NameError:
+        # Fallback minimaliste (au cas où)
+        def draw(weight_dict):
+            ops = list(weight_dict.keys())
+            ws  = list(weight_dict.values())
+            total = sum(ws) if sum(ws) > 0 else len(ws)
+            # normalisation implicite par random.choices(weights=...)
+            return random.choices(ops, weights=ws if sum(ws) > 0 else [1.0]*len(ws), k=1)[0]
+        return draw(w_remove), draw(w_insert)
+
+
+# =========================
+# ALNS : boucle principale
+# =========================
+def alns(initial_routes, coords,
+         metric="manhattan",
+         n_iter=500,
+         q_remove=2,
+         demandes=None,
+         capacite=None,
+         contraintes=None,
+         seed=None,
+         log_every=50):
+    """
+    Lance l'ALNS sur une solution initiale.
+    Retourne l'état final (incluant le meilleur global).
+    """
+
+    if seed is not None:
+        random.seed(seed)
+
+    # 0) Opérateurs disponibles
+    remove_ops = ["worst", "random"]
+    insert_ops = ["greedy"]
+
+    # 1) Init scores & params (tes fonctions déjà corrigées)
+    scores, params = init_scores_and_params(remove_ops, insert_ops)
+
+    # 2) Température initiale (si non déjà fournie dans params)
+    T = 20.0  # valeur par défaut raisonnable pour de petites instances
+    # (apply_acceptance fait le cooling si mode 'sa')
+
+    # 3) État courant
+    S0 = [rt[:] for rt in initial_routes]
+    C0 = cout_total(S0, coords, metric)
+    state = {
+        "S": S0,
+        "C": C0,
+        "S_best": [rt[:] for rt in S0],
+        "C_best": C0
+    }
+
+    # 4) Dictionnaires d’opérateurs -> fonctions
+    remove_funcs = {
+        "worst": lambda routes, coords, q, metric:
+            worst_removal(routes, coords, q=q, metric=metric),
+        "random": lambda routes, coords, q, metric:
+            random_removal(routes, coords, q=q, metric=metric),
+    }
+    repair_funcs = {
+        "greedy": lambda routes_partial, removed, coords, metric, **kw:
+            repair_greedy(routes_partial, removed, coords, metric, **kw),
+    }
+
+    # 5) Boucle ALNS
+    it = 1
+    while it <= n_iter:
+        # 5.1 Sélection opérateurs via poids
+        op_remove, op_insert = selection_from_scores(scores)
+
+        # 5.2 Récup fonctions
+        remove_func = remove_funcs.get(op_remove)
+        repair_func = repair_funcs.get(op_insert)
+        if remove_func is None or repair_func is None:
+            # Opérateur inconnu -> on passe (sécurité)
+            it += 1
+            continue
+
+        # 5.3 Une itération ALNS (ta fonction)
+        state, T, scores, outcome = alns_iteration(
+            state, coords, metric, T, params, scores,
+            op_remove, op_insert, remove_func, repair_func, q_remove,
+            demandes=demandes, capacite=capacite, contraintes=contraintes
+        )
+
+        # 5.4 Logs légers
+        if (log_every is not None) and (it % log_every == 0):
+            print(f"[ALNS] it={it:5d} | outcome={outcome:15s} | C={state['C']:.2f} | C*={state['C_best']:.2f} | T={T:.4f}")
+
+        it += 1
+
+    # 6) Retour
+    return state
+
+def gap(cout, fichier_vrp):
+    """
+    Calcule l'écart (en %) entre un coût courant et le coût optimal indiqué
+    dans le fichier .sol correspondant (même nom que le .vrp, extension .sol).
+    Retourne un float (pourcentage) ou None si le .sol est introuvable ou illisible.
+    """
+    try:
+        # Construire le chemin vers le fichier .sol
+        nom_fichier = os.path.basename(fichier_vrp)  # ex: "A-n32-k5.vrp"
+        base, _ = os.path.splitext(nom_fichier)       # ex: "A-n32-k5"
+        sol_path = os.path.join("data", base + ".sol")  # ex: "data/A-n32-k5.sol"
+        
+        with open(sol_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("Cost"):
+                    # Extraire le nombre après "Cost"
+                    # Format attendu: "Cost 784" ou "Cost: 784"
+                    parts = line.replace(":", "").split()
+                    if len(parts) >= 2:
+                        try:
+                            opt = float(parts[1])
+                            if opt == 0:
+                                return None
+                            return 100.0 * (cout - opt) / opt
+                        except ValueError:
+                            continue
+        return None
+    except FileNotFoundError:
+        print(f"Fichier .sol non trouvé: {sol_path}")
+        return None
+    except Exception as e:
+        print(f"Erreur lors de la lecture du fichier .sol: {e}")
+        return None
+
+def tracer_vrp(fichier, routes=None, titre="Clients et Dépôts"):
+    coords = lire_coordonnees(fichier)
+    depots = lire_depots(fichier)
+
+    # Séparer clients
+    clients = []
+    for i in coords.keys():
+        est_depot = False
+        for d in depots:
+            if i == d:
+                est_depot = True
+                break
+        if not est_depot:
+            clients.append(i)
+
+    # Points
+    x_clients, y_clients = [], []
+    for cid in clients:
+        x, y = coords[cid]
+        x_clients.append(x); y_clients.append(y)
+
+    x_depots, y_depots = [], []
+    for did in depots:
+        x, y = coords[did]
+        x_depots.append(x); y_depots.append(y)
+
+    # Plot
+    plt.figure()
+    plt.scatter(x_clients, y_clients, c='blue', label='Clients')
+    plt.scatter(x_depots, y_depots, c='red', marker='s', s=120, label='Dépôts')
+
+    # Labels
+    for i, (x, y) in coords.items():
+        plt.text(x + 0.5, y + 0.5, str(i), fontsize=8, color="black")
+
+    # Routes : couleur différente par route
+    if routes is not None and len(routes) > 0:
+        couleurs = plt.cm.tab20.colors  # palette de 20 couleurs
+        for r_idx, route in enumerate(routes):
+            col = couleurs[r_idx % len(couleurs)]
+            label = f"Camion {r_idx + 1}"
+            # On met le label uniquement sur la première arête de la route,
+            premiere = True
+
+            i = 0
+            while i < len(route) - 1:
+                x1, y1 = coords[route[i]]
+                x2, y2 = coords[route[i + 1]]
+                if premiere:
+                    plt.plot([x1, x2], [y1, y2], '-', color=col, label=label)
+                    premiere = False
+                else:
+                    plt.plot([x1, x2], [y1, y2], '-', color=col)
+                i += 1
+
+    plt.title(titre)
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.legend()
+    plt.axis("equal")
+    plt.grid(True)
+    plt.show()
+
+
+coords = lire_coordonnees(choix_fichier)
+routes = solution_initiale(choix_fichier)
+tracer_vrp(choix_fichier, routes, titre="Solution Initiale VRP")
+print("cout total de la solution initiale :", cout_total(routes, coords, metric="manhattan"))
+
+# --- ALNS ---
+debut = time.perf_counter()
+tracemalloc.start()
+state_final = alns(
+    initial_routes=routes,
+    coords=coords,
+    metric="manhattan",   # pas de diagonale
+    n_iter=3000,
+    q_remove=2,
+    demandes=lire_demandes(choix_fichier),
+    capacite=lire_capacite(choix_fichier),
+    contraintes=None,
+    seed=42,
+    log_every=300
+)
+
+print("Coût final       :", state_final["C"])
+print("Meilleur global :", state_final["C_best"])
+tracer_vrp(choix_fichier, state_final["S_best"], titre="ALNS — meilleure solution")
+print("Écart (%)    :", gap(state_final["C_best"], choix_fichier))
+
+fin = time.perf_counter()
+print("Temps d'exécution :", fin - debut, "secondes")
+current, peak = tracemalloc.get_traced_memory()
+print(f"Mémoire actuelle : {current / 1024:.2f} Ko")
