@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import random
 import time
 import tracemalloc
+import vrplib
 
 choix = None
 while choix != 0 and choix != 1:
@@ -481,8 +482,7 @@ def appli_acceptation(state, candidate, selected_ops, T, params, scores):
         scores["insert"][op_insert]["uses"] += 1
 
         # Refroidissement éventuel
-        if params.get("accept_mode", "sa") == "sa":
-            T = params.get("alpha", 0.995) * T
+        T = refroidissement(T, params)
 
         # Mise à jour par segment (incrément du compteur + éventuel update des poids)
         scores["iters_in_segment"] += 1
@@ -518,7 +518,7 @@ def appli_acceptation(state, candidate, selected_ops, T, params, scores):
     else:
         outcome = "accepted_worse"
 
-    # Créditer opérateurs (score + uses) — remove ET insert
+    # Créditer opérateurs (score + uses) - remove ET insert
     pi = scores["pi"]
     credit = pi.get(outcome, 0.0)
     scores["remove"][op_remove]["score"] += credit
@@ -527,8 +527,7 @@ def appli_acceptation(state, candidate, selected_ops, T, params, scores):
     scores["insert"][op_insert]["uses"] += 1
 
     # Refroidissement éventuel
-    if params.get("accept_mode", "sa") == "sa":
-        T = params.get("alpha", 0.995) * T
+    T = refroidissement(T, params)
 
     # Mise à jour par segment (incrément du compteur + éventuel update des poids)
     scores["iters_in_segment"] += 1
@@ -619,7 +618,7 @@ def refroidissement(T, params):
     Refroidissement simple : T <- alpha * T (simulated annealing)
     """
     if params.get("accept_mode", "sa") == "sa":
-        T = max(1e-12, params.get("alpha", 0.995) * T)
+        T = params.get("alpha", 0.995) * T
     return T
 
 def random_removal(routes, coords, q=2, metric="manhattan"):
