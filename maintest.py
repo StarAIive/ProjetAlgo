@@ -899,7 +899,7 @@ def alns(initial_routes, coords,
 
         # Logs
         if (log_every is not None) and (it % log_every == 0):
-            print(f"[ALNS] it={it:5d} | outcome={outcome:15s} | C={state['C']:.2f} | C*={state['C_best']:.2f} | T={T:.4f}")
+            print(f"[ALNS] it={it:5d} | destroy={op_remove} | repair={op_insert} | outcome={outcome:15s} | C={state['C']:.2f} | C*={state['C_best']:.2f} | T={T:.4f}")
 
         it += 1
 
