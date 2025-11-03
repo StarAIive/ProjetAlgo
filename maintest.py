@@ -893,6 +893,9 @@ def alns(initial_routes, coords,
 
                     state["S_best"] = S_best
                     state["C_best"] = optimized_cost
+        if time.perf_counter() - debut > 600:
+            print("Temps maximum écoulé (600s). Arrêt de l'ALNS.")
+            return state
 
         # Logs
         if (log_every is not None) and (it % log_every == 0):
