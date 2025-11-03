@@ -576,6 +576,7 @@ def init_scores_et_param(remove_ops, insert_ops):
 
     return scores, params
 
+
 def alns_iteration(state, coords, metric, T, params, scores,
                    op_remove, op_repair, remove_func, repair_func, q_remove,
                    demandes=None, capacite=None, contraintes=None):
@@ -744,10 +745,59 @@ def selection_de_scores(scores):
     for op, data in scores["insert"].items():
         w_insert[op] = data["weight"]
 
+
     # Tirage par roulette (pondéré)
 
     op_remove, op_insert = selection_op(w_remove, w_insert) 
     return op_remove, op_insert
+
+def optimisation_2opt(routes, coords, metric="euclidienne"):
+    """
+    Applique l'optimisation 2-opt améliorée sur chaque route individuellement.
+    """
+    improved_routes = []
+    
+    for route in routes:
+        if len(route) <= 4:  # route trop courte pour 2-opt efficace
+            improved_routes.append(route[:])
+            continue
+            
+        best_route = route[:]
+        improved = True
+        max_iterations = 5  # limite pour éviter la stagnation
+        iteration = 0
+        
+        while improved and iteration < max_iterations:
+            improved = False
+            iteration += 1
+            
+            # Calcul incrémental des gains pour éviter recalculs coûteux
+            for i in range(1, len(best_route) - 2):
+                for j in range(i + 2, min(i + 20, len(best_route) - 1)):  # limite voisinage
+                    # Calcul du gain 2-opt directement
+                    x1, y1 = coords[best_route[i-1]]
+                    x2, y2 = coords[best_route[i]]
+                    x3, y3 = coords[best_route[j]]
+                    x4, y4 = coords[best_route[j+1]]
+                    
+                    if metric == "manhattan":
+                        old_cost = (abs(x1-x2) + abs(y1-y2)) + (abs(x3-x4) + abs(y3-y4))
+                        new_cost = (abs(x1-x3) + abs(y1-y3)) + (abs(x2-x4) + abs(y2-y4))
+                    else:
+                        old_cost = math.hypot(x1-x2, y1-y2) + math.hypot(x3-x4, y3-y4)
+                        new_cost = math.hypot(x1-x3, y1-y3) + math.hypot(x2-x4, y2-y4)
+                    
+                    if new_cost < old_cost:  # Amélioration trouvée
+                        # Appliquer le 2-opt
+                        best_route[i:j+1] = reversed(best_route[i:j+1])
+                        improved = True
+                        break
+                if improved:
+                    break
+        
+        improved_routes.append(best_route)
+    
+    return improved_routes
 
 def alns(initial_routes, coords,
          metric="manhattan",
@@ -827,6 +877,22 @@ def alns(initial_routes, coords,
             demandes=demandes, capacite=capacite, contraintes=contraintes
         )
 
+        # Optimisation locale périodique (2-opt toutes les 100 itérations)
+        if it % 100 == 0:
+            optimized_routes = optimisation_2opt(state["S"], coords, metric)
+            optimized_cost = cout_total(optimized_routes, coords, metric)
+            
+            if optimized_cost < state["C"]:
+                state["S"] = optimized_routes
+                state["C"] = optimized_cost
+                
+                if optimized_cost < state["C_best"]:
+                    S_best = []
+                    for rt in optimized_routes:
+                        S_best.append(rt[:])
+
+                    state["S_best"] = S_best
+                    state["C_best"] = optimized_cost
         if time.perf_counter() - debut > 600:
             print("Temps maximum écoulé (600s). Arrêt de l'ALNS.")
             return state
@@ -837,7 +903,16 @@ def alns(initial_routes, coords,
 
         it += 1
 
-    # 6) Retour
+    # 6) Optimisation finale 2-opt
+    final_optimized = optimisation_2opt(state["S_best"], coords, metric)
+    final_cost = cout_total(final_optimized, coords, metric)
+    
+    if final_cost < state["C_best"]:
+        state["S_best"] = final_optimized
+        state["C_best"] = final_cost
+        print(f"[POST-OPT] Amélioration finale: {final_cost:.2f}")
+
+    # 7) Retour
     return state
 
 def gap(cout, fichier_vrp):
@@ -937,6 +1012,7 @@ def tracer_vrp(fichier, routes=None, titre="Clients et Dépôts"):
     plt.axis("equal")
     plt.grid(True)
     plt.show()
+
 
 coords = lire_coordonnees(choix_fichier)
 routes = solution_initiale(choix_fichier)
