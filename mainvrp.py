@@ -699,8 +699,8 @@ def init_scores_et_param(remove_ops, insert_ops):
             "improve": 25.0,     
             "accepted_worse": 3.0
         },
-        "rho": 0.6,          # Apprentissage plus rapide (0.5 -> 0.6)
-        "segment_len": 30,   # Segments plus courts pour adaptation plus rapide (50 -> 30)
+        "rho": 0.65,
+        "segment_len": 25,
         "iters_in_segment": 0
     }
 
@@ -711,7 +711,7 @@ def init_scores_et_param(remove_ops, insert_ops):
 
     params = {
         "accept_mode": "sa",  
-        "alpha": 0.992,       # Refroidissement plus rapide (0.9995 -> 0.992)
+        "alpha": 0.996,
         "epsilon": 0.0 
     }
 
@@ -789,8 +789,8 @@ def alns(initial_routes, coords,
     # Init scores & params
     scores, params = init_scores_et_param(remove_ops, insert_ops)
 
-    # Température initiale
-    T = 150.0 
+    # Température initiale élevée mais optimisée pour convergence rapide
+    T = 200.0 
 
     # État courant
     S0 = []
@@ -978,14 +978,14 @@ state_final = alns(
     initial_routes=routes,
     coords=coords,
     metric="euclidienne", 
-    n_iter=3500, 
-    q_remove=6,   
+    n_iter=1500, 
+    q_remove=7,
     demandes=get_demands_dict(instance),
     capacite=instance["capacity"],
     contraintes=None,
     seed=42,
-    log=500,
-    max_time=360    
+    log=100,
+    max_time=300 
 )
 
 print("Coût final       :", state_final["C"])
