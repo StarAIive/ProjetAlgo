@@ -129,13 +129,15 @@ def lire_capacite(fichier):
 def solution_initiale(fichier):
     coords = lire_coordonnees(fichier)
     depots = lire_depots(fichier)
+    capacites = lire_capacite(fichier)
     demandes = lire_demandes(fichier)
-    capacite = lire_capacite(fichier)
+
     if not depots:
         print("Aucun dépôt trouvé.")
         return []
     depot = depots[0]
 
+    # Identifier tous les clients (non-dépôts)
     clients = []
     for i in coords.keys():
         est_depot = False
@@ -145,41 +147,54 @@ def solution_initiale(fichier):
                 break
         if not est_depot:
             clients.append(i)
+    print("Clients :", clients)
 
-    tour = [depot]
-    p = 0
-    demande = 0
-    while p < len(clients):
-        if clients[p] in demandes:
-            demande += demandes[clients[p]]
-            if capacite is not None and demande > capacite:
-                tour.append(depot)
-                demande = 0
-            else:
-                tour.append(clients[p])
-                p += 1
-    tour.append(depot)
+    # Fonction pour calculer la distance euclidienne entre deux points
+    def distance(point1, point2):
+        if point1 in coords and point2 in coords:
+            x1, y1 = coords[point1]
+            x2, y2 = coords[point2]
+            return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+        return float('inf')
+
+    # Algorithme glouton pour créer les routes
     routes = []
-    courants = []
-    i = 0
-    n = len(tour)
-    while i < n:
-        v = tour[i]
-        if v == depot:
-            if len(courants) > 0:
-                # on close la route: [depot] + clients + [depot]
-                route = [depot]
-                j = 0
-                while j < len(courants):
-                    route.append(courants[j])
-                    j += 1
-                route.append(depot)
-                routes.append(route)
-                courants = []
-            # sinon: dépôt isolé -> on ignore (c'est juste une frontière)
-        else:
-            courants.append(v)
-        i += 1
+    clients_non_visites = clients[:]  # copie de la liste des clients
+    
+    while len(clients_non_visites) > 0:
+        # Commencer une nouvelle route depuis le dépôt
+        route_actuelle = [depot]
+        capacite_actuelle = 0
+        position_actuelle = depot
+        
+        while True:
+            # Trouver le client non visité le plus proche qui respecte la contrainte de capacité
+            meilleur_client = None
+            meilleure_distance = float('inf')
+            
+            for client in clients_non_visites:
+                # Vérifier la contrainte de capacité
+                demande_client = demandes.get(client, 0)
+                if capacites is None or (capacite_actuelle + demande_client <= capacites):
+                    dist = distance(position_actuelle, client)
+                    if dist < meilleure_distance:
+                        meilleure_distance = dist
+                        meilleur_client = client
+            
+            # Si aucun client ne peut être ajouté (contrainte de capacité ou plus de clients)
+            if meilleur_client is None:
+                break
+            
+            # Ajouter le meilleur client à la route
+            route_actuelle.append(meilleur_client)
+            capacite_actuelle += demandes.get(meilleur_client, 0)
+            position_actuelle = meilleur_client
+            clients_non_visites.remove(meilleur_client)
+        
+        # Retourner au dépôt pour fermer la route
+        route_actuelle.append(depot)
+        routes.append(route_actuelle)
+
     return routes
 
 def cout_total(routes, coords, metric="euclidienne"):
