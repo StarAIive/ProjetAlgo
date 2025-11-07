@@ -637,7 +637,7 @@ def acceptation_regle(delta, T, mode="sa", epsilon=0.0):
 
 def appli_acceptation(state, candidate, selected_ops, T, params, scores):
     """
-    Applique acceptation/rejet + met à jour S/C, best global, T, et les crédits opérateurs.
+    Applique acceptation/rejet + met à jour C, best global, T, et les crédits opérateurs.
     """
     C_cur = state["C"]
     C_new = candidate["C_new"]

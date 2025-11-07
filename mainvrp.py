@@ -601,7 +601,7 @@ def acceptation_regle(delta, T, mode="sa", epsilon=0.0):
 
 def appli_acceptation(state, candidate, selected_ops, T, params, scores):
     """
-    Applique acceptation/rejet + met à jour S/C, best global, T, et les crédits opérateurs.
+    Applique acceptation/rejet + met à jour C, best global, T, et les crédits opérateurs.
     """
     C_cur = state["C"]
     C_new = candidate["C_new"]
@@ -808,20 +808,14 @@ def alns(initial_routes, coords,
 
     # Dictionnaires d’opérateurs -> fonctions
     remove_funcs = {
-        "worst": lambda routes, coords, q, metric:
-            worst_removal(routes, coords, q=q, metric=metric),
-        "random": lambda routes, coords, q, metric:
-            random_removal(routes, coords, q=q, metric=metric),
-        "shaw": lambda routes, coords, q, metric:
-            shaw_removal(routes, coords, q=q, metric=metric),
+        "worst": worst_removal,
+        "random": random_removal,
+        "shaw": shaw_removal
     }
     repair_funcs = {
-        "greedy": lambda routes_partial, removed, coords, metric, **kw:
-            reparation_greedy(routes_partial, removed, coords, metric, **kw),
-        "best": lambda routes_partial, removed, coords, metric, **kw:
-            best_reparation(routes_partial, removed, coords, metric, **kw),
-        "regret": lambda routes_partial, removed, coords, metric, **kw:
-            regret_reparation(routes_partial, removed, coords, metric, **kw),
+        "greedy": reparation_greedy,
+        "best": best_reparation,
+        "regret": regret_reparation
     }
 
     # Boucle ALNS
