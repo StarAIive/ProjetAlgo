@@ -574,7 +574,7 @@ def regret_reparation(routes_partial, removed, coords, metric="manhattan",
     
     return routes_modifiees, non_inseres, delta_total
 
-def acceptation_regle(delta, T, mode="sa", epsilon=0.0):
+def acceptation_regle(delta, T, mode="sa"):
     """
     Décide si on accepte une solution candidate (delta = C(S') - C(S)).
     """
@@ -593,9 +593,6 @@ def acceptation_regle(delta, T, mode="sa", epsilon=0.0):
     elif mode == "improve_only":
         return False
 
-    elif mode == "threshold":
-        return delta <= epsilon
-
     # Par défaut : refuser
     return False
 
@@ -612,7 +609,6 @@ def appli_acceptation(state, candidate, selected_ops, T, params, scores):
         delta, 
         T, 
         mode=params.get("accept_mode", "sa"), 
-        epsilon=params.get("epsilon", 0.0)
     )
 
     op_remove, op_insert = selected_ops
@@ -712,7 +708,6 @@ def init_scores_et_param(remove_ops, insert_ops):
     params = {
         "accept_mode": "sa",  
         "alpha": 0.996,
-        "epsilon": 0.0 
     }
 
     return scores, params
