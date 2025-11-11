@@ -6,6 +6,7 @@ import random
 import time
 import tracemalloc
 import vrplib
+import numpy as np
 
 choix = None
 while choix != 0 and choix != 1:
@@ -765,7 +766,8 @@ def alns(initial_routes, coords,
          contraintes=None,
          seed=None,
          log=50,
-         max_time=None):
+         max_time=None,
+         couts_log=[]):
     """
     Lance l'ALNS sur une solution initiale.
     Retourne l'état final (incluant le meilleur global).
@@ -838,6 +840,8 @@ def alns(initial_routes, coords,
         if max_time is not None and time.perf_counter() - start_time > max_time:
             print(f"Temps maximum écoulé ({max_time}s). Arrêt de l'ALNS.")
             return state
+        # Analyse statistique
+        couts_log.append(state["C"])
 
         # Logs
         if (log is not None) and (it % log == 0):
@@ -846,7 +850,7 @@ def alns(initial_routes, coords,
         it += 1
 
     # 6) Retour
-    return state
+    return state, couts_log
 
 def gap(cout, fichier_vrp):
     """
@@ -954,36 +958,111 @@ def tracer_vrp(instance, routes=None, titre="Clients et Dépôts"):
     plt.grid(True)
     plt.show()
 
+def courbe_convergence(couts_log):
+    """
+    Trace la courbe de convergence des coûts au fil des itérations.
+    """
+    plt.figure()
+    plt.plot(range(1, len(couts_log) + 1), couts_log, marker='o')
+    plt.title("Courbe de Convergence des Coûts")
+    plt.xlabel("Itération")
+    plt.ylabel("Coût de la Solution")
+    plt.grid(True)
+    plt.show()
+
+def bloxplot(state_log):
+    """
+    Trace un boxplot des coûts finaux sur plusieurs exécutions.
+    """
+    couts_finaux = [state["C_best"] for state in state_log]
+
+    plt.figure(figsize=(10, 6))
+    box_plot = plt.boxplot(couts_finaux, vert=True, patch_artist=True)
+    
+    # Calculer les statistiques
+    q1 = np.percentile(couts_finaux, 25)
+    median = np.percentile(couts_finaux, 50)
+    q3 = np.percentile(couts_finaux, 75)
+    minimum = np.min(couts_finaux)
+    maximum = np.max(couts_finaux)
+    moyenne = np.mean(couts_finaux)
+    
+    # Créer un texte consolidé en haut à droite
+    stats_text = f"""Statistiques:
+Min: {minimum:.1f}
+Q1: {q1:.1f}
+Médiane: {median:.1f}
+Q3: {q3:.1f}
+Max: {maximum:.1f}
+Moyenne: {moyenne:.1f}"""
+    
+    # Positionner le texte en haut à droite
+    plt.text(0.98, 0.95, stats_text, transform=plt.gca().transAxes, 
+             fontsize=10, verticalalignment='top', horizontalalignment='right',
+             bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
+    
+    plt.title(f"Boxplot des Coûts Finaux sur {len(couts_finaux)} Exécution(s)")
+    plt.ylabel("Coût de la Solution")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
 # Utilisation des données VRPLib
 coords = get_coords_dict(instance)
-routes = solution_initiale(instance)
-tracer_vrp(instance, routes, titre="Solution Initiale VRP")
-print("cout total de la solution initiale :", cout_total(routes, coords, metric="manhattan"))
 
-# ALNS
-debut = time.perf_counter()
-tracemalloc.start()
-state_final = alns(
-    initial_routes=routes,
-    coords=coords,
-    metric="euclidienne", 
-    n_iter=1500, 
-    q_remove=7,
-    demandes=get_demands_dict(instance),
-    capacite=instance["capacity"],
-    contraintes=None,
-    seed=42,
-    log=100,
-    max_time=300 
-)
+# Boucle principale pour permettre plusieurs exécutions
+continuer = True
+state_log = []
+while continuer:
+    routes = solution_initiale(instance)
+    tracer_vrp(instance, routes, titre="Solution Initiale VRP")
+    print("cout total de la solution initiale :", cout_total(routes, coords, metric="manhattan"))
 
-print("Coût final       :", state_final["C"])
-print("Meilleur global :", state_final["C_best"])
-print("Écart (%)    :", gap(state_final["C_best"], choix_fichier))
+    # ALNS
+    debut = time.perf_counter()
+    tracemalloc.start()
+    state_final, couts_log = alns(
+        initial_routes=routes,
+        coords=coords,
+        metric="euclidienne", 
+        n_iter=1500, 
+        q_remove=7,
+        demandes=get_demands_dict(instance),
+        capacite=instance["capacity"],
+        contraintes=None,
+        seed=42,
+        log=100,
+        max_time=300,
+        couts_log=[]
+    )
 
-fin = time.perf_counter()
-print("Temps d'exécution :", fin - debut, "secondes")
-current, peak = tracemalloc.get_traced_memory()
-print(f"Mémoire actuelle : {current / 1024:.2f} Ko")
+    print("Coût final       :", state_final["C"])
+    print("Meilleur global :", state_final["C_best"])
+    print("Écart (%)    :", gap(state_final["C_best"], choix_fichier))
 
-tracer_vrp(instance, state_final["S_best"], titre="ALNS: meilleure solution")
+    fin = time.perf_counter()
+    print("Temps d'exécution :", fin - debut, "secondes")
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"Mémoire actuelle : {current / 1024:.2f} Ko")
+    state_log.append(state_final)
+
+    tracer_vrp(instance, state_final["S_best"], titre="ALNS: meilleure solution")
+    courbe_convergence(couts_log)
+ 
+    # Demander à l'utilisateur s'il veut recommencer
+    print("\n")
+    while True:
+        try:
+            reponse = input("Voulez-vous faire une nouvelle exécution de l'algorithme ? (o/n) : ").lower().strip()
+            if reponse in ['o', 'oui', 'y', 'yes']:
+                continuer = True
+                break
+            elif reponse in ['n', 'non', 'no']:
+                continuer = False
+                break
+            else:
+                print("Veuillez répondre par 'o' (oui) ou 'n' (non)")
+        except (EOFError, KeyboardInterrupt):
+            continuer = False
+            break
+bloxplot(state_log)
