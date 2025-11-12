@@ -6,7 +6,6 @@ import random
 import time
 import tracemalloc
 import vrplib
-import numpy as np
 
 choix = None
 while choix != 0 and choix != 1:
@@ -23,10 +22,11 @@ while choix != 0 and choix != 1:
 print(f"Mode sélectionné : {choix}")
 
 if choix == 0:
-    dossier = "data"
-    fichiers_vrp = glob.glob(os.path.join(dossier, "*.vrp"))
+    
+    dossier1 = "data"
+    fichiers_vrp = glob.glob(os.path.join(dossier1, "*.vrp"))
     if not fichiers_vrp:
-        print("Aucun fichier .vrp trouvé dans le dossier data/")
+        print("Aucun fichier .vrp trouvé dans les dossier data/")
         raise SystemExit
 
     print("Fichiers .vrp disponibles :")
@@ -52,8 +52,36 @@ if choix == 0:
     instance = vrplib.read_instance(choix_fichier)
     print(f"Instance chargée : {instance['dimension']} nœuds, capacité {instance['capacity']}")
 else:
-    print("Mode 1 (contraintes supplémentaires) : non implémenté pour l’instant.")
-    raise SystemExit
+    
+    dossier2 = "data2"
+    fichiers_txt = glob.glob(os.path.join(dossier2, "*.vrp"))
+    if not fichiers_txt:
+        print("Aucun fichier .vrp trouvé dans le dossier data2/")
+        raise SystemExit
+
+    print("Fichiers VRP/TW disponibles :")
+    for idx, fp in enumerate(fichiers_txt, start=1):
+        print(f"{idx} - {os.path.basename(fp)}")
+
+    while True:
+        try:
+            k = int(input(f"\nChoisissez un fichier (1-{len(fichiers_txt)}) : "))
+            if 1 <= k <= len(fichiers_txt):
+                choix_fichier = fichiers_txt[k - 1]
+                nom_fichier = os.path.basename(choix_fichier)
+                break
+            else:
+                print(f"Erreur : veuillez entrer un nombre entre 1 et {len(fichiers_txt)}")
+        except ValueError:
+            print("Erreur : veuillez entrer un nombre valide")
+    print(f"\nFichier sélectionné : {nom_fichier}")
+
+    instance = vrplib.read_instance(choix_fichier)
+    print(f"Instance chargée (mode 1) : {instance['dimension']} nœuds, capacité {instance['capacity']}")
+
+    # verifier s'il ya bien les fenetres de temps dans le fichier
+    if "time_window" not in instance:
+        print("Le fichier ne contient pas de 'time_window' dans l'instance VRPLib.")
 
 # Fonctions utilisant VRPLib remplacent les anciennes fonctions de lecture
 def get_coords_dict(instance):
@@ -398,23 +426,96 @@ def delta_insertion(route, idx, node, coords, metric="manhattan"):
 
     return delta
 
+def simulate_route_with_tw(route, coords, metric, time_windows, service_times):
+    """
+    Simule le passage sur toute la route en respectant les fenêtres de temps.
+    route : liste de noeuds (ex: [0, 5, 7, 0])
+    time_windows : dict {node: (e_i, l_i)}
+    service_times : dict {node: s_i}
+    Retourne True si toute la route respecte les TW, sinon False.
+    """
+    # temps courant au dépôt = 0
+    current_time = 0.0
 
-def insertion_faisable(route, idx, node, demandes=None, capacite=None, contraintes=None):
+    for i in range(len(route)):
+        node = route[i]
+
+        # distance depuis le précédent
+        if i > 0:
+            prev = route[i - 1]
+            x1, y1 = coords[prev]
+            x2, y2 = coords[node]
+            if metric == "manhattan":
+                travel = abs(x1 - x2) + abs(y1 - y2)
+            else:
+                travel = math.hypot(x1 - x2, y1 - y2)
+            current_time += travel
+
+        # fenêtre de temps du noeud
+        e_i, l_i = time_windows.get(node, (0.0, float("inf")))
+        s_i = service_times.get(node, 0.0)
+
+        # si on arrive trop tôt, on attend
+        if current_time < e_i:
+            current_time = e_i
+
+        # si on arrive après la fin de fenêtre -> infeasible
+        if current_time > l_i:
+            return False
+
+        # on fait le service
+        current_time += s_i
+
+    return True
+
+
+
+def insertion_faisable(route, idx, node,
+                       demandes=None, capacite=None,
+                       contraintes=None,
+                       coords=None, metric="manhattan"):
     """
-    Faisabilité minimale : capacité par route (les dépôts sont aux extrémités).
+    Vérifie si on peut insérer `node` entre route[idx] et route[idx+1]
+    en respectant :
+      - la capacité (déjà dans ton code)
+      - éventuellement les fenêtres de temps (quand elles sont fournies)
     """
+    # 1) Vérif capacité (ton code d'origine)
     if demandes is not None and capacite is not None:
         charge = 0
-        i = 1
-        while i < len(route) - 1:  # ignorer dépôts
+        # on recalcule la charge actuelle de la route
+        for i in range(1, len(route) - 1):  # on ignore les dépôts aux extrémités
             client = route[i]
             charge += demandes.get(client, 0)
-            i += 1
+        # on ajoute le client qu'on veut insérer
         charge += demandes.get(node, 0)
         if charge > capacite:
             return False
 
-    # (extensions TW/compatibilité plus tard via `contraintes`)
+    # 2) Vérif fenêtres de temps si on en a
+    if contraintes is not None and "time_windows" in contraintes:
+        time_windows = contraintes.get("time_windows", {})
+        service_times = contraintes.get("service_times", {})
+
+        # on construit la route telle qu'elle serait après insertion
+        new_route = route[:idx + 1] + [node] + route[idx + 1:]
+
+        # on doit avoir coords pour simuler
+        if coords is None:
+            # si pas de coords -> on ne peut pas vérifier, on dit juste OK
+            return True
+
+        ok = simulate_route_with_tw(
+            new_route,
+            coords,
+            metric,
+            time_windows,
+            service_times
+        )
+        if not ok:
+            return False
+
+    # si tout est bon
     return True
 
 
@@ -534,7 +635,7 @@ def regret_reparation(routes_partial, removed, coords, metric="manhattan",
             
             for r_idx, route in enumerate(routes_modifiees):
                 for i in range(len(route) - 1):
-                    if insertion_faisable(route, i, client, demandes, capacite, contraintes):
+                    if insertion_faisable(route, i, client, demandes=demandes, capacite=capacite, contraintes=contraintes, coords=coords, metric=metric):
                         delta = delta_insertion(route, i, client, coords, metric)
                         insertion_costs.append((delta, r_idx, i))
             
@@ -575,7 +676,7 @@ def regret_reparation(routes_partial, removed, coords, metric="manhattan",
     
     return routes_modifiees, non_inseres, delta_total
 
-def acceptation_regle(delta, T, mode="sa"):
+def acceptation_regle(delta, T, mode="sa", epsilon=0.0):
     """
     Décide si on accepte une solution candidate (delta = C(S') - C(S)).
     """
@@ -594,12 +695,15 @@ def acceptation_regle(delta, T, mode="sa"):
     elif mode == "improve_only":
         return False
 
+    elif mode == "threshold":
+        return delta <= epsilon
+
     # Par défaut : refuser
     return False
 
 def appli_acceptation(state, candidate, selected_ops, T, params, scores):
     """
-    Applique acceptation/rejet + met à jour C, best global, T, et les crédits opérateurs.
+    Applique acceptation/rejet + met à jour S/C, best global, T, et les crédits opérateurs.
     """
     C_cur = state["C"]
     C_new = candidate["C_new"]
@@ -610,6 +714,7 @@ def appli_acceptation(state, candidate, selected_ops, T, params, scores):
         delta, 
         T, 
         mode=params.get("accept_mode", "sa"), 
+        epsilon=params.get("epsilon", 0.0)
     )
 
     op_remove, op_insert = selected_ops
@@ -709,6 +814,7 @@ def init_scores_et_param(remove_ops, insert_ops):
     params = {
         "accept_mode": "sa",  
         "alpha": 0.996,
+        "epsilon": 0.0 
     }
 
     return scores, params
@@ -766,8 +872,7 @@ def alns(initial_routes, coords,
          contraintes=None,
          seed=None,
          log=50,
-         max_time=None,
-         couts_log=[]):
+         max_time=None):
     """
     Lance l'ALNS sur une solution initiale.
     Retourne l'état final (incluant le meilleur global).
@@ -805,14 +910,20 @@ def alns(initial_routes, coords,
 
     # Dictionnaires d’opérateurs -> fonctions
     remove_funcs = {
-        "worst": worst_removal,
-        "random": random_removal,
-        "shaw": shaw_removal
+        "worst": lambda routes, coords, q, metric:
+            worst_removal(routes, coords, q=q, metric=metric),
+        "random": lambda routes, coords, q, metric:
+            random_removal(routes, coords, q=q, metric=metric),
+        "shaw": lambda routes, coords, q, metric:
+            shaw_removal(routes, coords, q=q, metric=metric),
     }
     repair_funcs = {
-        "greedy": reparation_greedy,
-        "best": best_reparation,
-        "regret": regret_reparation
+        "greedy": lambda routes_partial, removed, coords, metric, **kw:
+            reparation_greedy(routes_partial, removed, coords, metric, **kw),
+        "best": lambda routes_partial, removed, coords, metric, **kw:
+            best_reparation(routes_partial, removed, coords, metric, **kw),
+        "regret": lambda routes_partial, removed, coords, metric, **kw:
+            regret_reparation(routes_partial, removed, coords, metric, **kw),
     }
 
     # Boucle ALNS
@@ -840,8 +951,6 @@ def alns(initial_routes, coords,
         if max_time is not None and time.perf_counter() - start_time > max_time:
             print(f"Temps maximum écoulé ({max_time}s). Arrêt de l'ALNS.")
             return state
-        # Analyse statistique
-        couts_log.append(state["C"])
 
         # Logs
         if (log is not None) and (it % log == 0):
@@ -850,7 +959,7 @@ def alns(initial_routes, coords,
         it += 1
 
     # 6) Retour
-    return state, couts_log
+    return state
 
 def gap(cout, fichier_vrp):
     """
@@ -958,111 +1067,64 @@ def tracer_vrp(instance, routes=None, titre="Clients et Dépôts"):
     plt.grid(True)
     plt.show()
 
-def courbe_convergence(couts_log):
-    """
-    Trace la courbe de convergence des coûts au fil des itérations.
-    """
-    plt.figure()
-    plt.plot(range(1, len(couts_log) + 1), couts_log, marker='o')
-    plt.title("Courbe de Convergence des Coûts")
-    plt.xlabel("Itération")
-    plt.ylabel("Coût de la Solution")
-    plt.grid(True)
-    plt.show()
-
-def bloxplot(state_log):
-    """
-    Trace un boxplot des coûts finaux sur plusieurs exécutions.
-    """
-    couts_finaux = [state["C_best"] for state in state_log]
-
-    plt.figure(figsize=(10, 6))
-    box_plot = plt.boxplot(couts_finaux, vert=True, patch_artist=True)
-    
-    # Calculer les statistiques
-    q1 = np.percentile(couts_finaux, 25)
-    median = np.percentile(couts_finaux, 50)
-    q3 = np.percentile(couts_finaux, 75)
-    minimum = np.min(couts_finaux)
-    maximum = np.max(couts_finaux)
-    moyenne = np.mean(couts_finaux)
-    
-    # Créer un texte consolidé en haut à droite
-    stats_text = f"""Statistiques:
-Min: {minimum:.1f}
-Q1: {q1:.1f}
-Médiane: {median:.1f}
-Q3: {q3:.1f}
-Max: {maximum:.1f}
-Moyenne: {moyenne:.1f}"""
-    
-    # Positionner le texte en haut à droite
-    plt.text(0.98, 0.95, stats_text, transform=plt.gca().transAxes, 
-             fontsize=10, verticalalignment='top', horizontalalignment='right',
-             bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
-    
-    plt.title(f"Boxplot des Coûts Finaux sur {len(couts_finaux)} Exécution(s)")
-    plt.ylabel("Coût de la Solution")
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
-
 # Utilisation des données VRPLib
 coords = get_coords_dict(instance)
+routes = solution_initiale(instance)
+tracer_vrp(instance, routes, titre="Solution Initiale VRP")
+print("cout total de la solution initiale :", cout_total(routes, coords, metric="manhattan"))
 
-# Boucle principale pour permettre plusieurs exécutions
-continuer = True
-state_log = []
-while continuer:
-    routes = solution_initiale(instance)
-    tracer_vrp(instance, routes, titre="Solution Initiale VRP")
-    print("cout total de la solution initiale :", cout_total(routes, coords, metric="manhattan"))
+time_windows = {}
+service_times = {}
 
-    # ALNS
-    debut = time.perf_counter()
-    tracemalloc.start()
-    state_final, couts_log = alns(
-        initial_routes=routes,
-        coords=coords,
-        metric="euclidienne", 
-        n_iter=1500, 
-        q_remove=7,
-        demandes=get_demands_dict(instance),
-        capacite=instance["capacity"],
-        contraintes=None,
-        seed=42,
-        log=100,
-        max_time=300,
-        couts_log=[]
-    )
+n = instance["dimension"]
+tw_array = instance.get("time_window", None)
+st_array = instance.get("service_time", None)
 
-    print("Coût final       :", state_final["C"])
-    print("Meilleur global :", state_final["C_best"])
-    print("Écart (%)    :", gap(state_final["C_best"], choix_fichier))
+for i in range(n):
+    if tw_array is not None:
+        e_i = float(tw_array[i][0])
+        l_i = float(tw_array[i][1])
+    else:
+        e_i, l_i = 0.0, float("inf")
+    time_windows[i] = (e_i, l_i)
 
-    fin = time.perf_counter()
-    print("Temps d'exécution :", fin - debut, "secondes")
-    current, peak = tracemalloc.get_traced_memory()
-    print(f"Mémoire actuelle : {current / 1024:.2f} Ko")
-    state_log.append(state_final)
+    if st_array is not None:
+        s_i = float(st_array[i])
+    else:
+        s_i = 0.0
+    service_times[i] = s_i
 
-    tracer_vrp(instance, state_final["S_best"], titre="ALNS: meilleure solution")
-    courbe_convergence(couts_log)
- 
-    # Demander à l'utilisateur s'il veut recommencer
-    print("\n")
-    while True:
-        try:
-            reponse = input("Voulez-vous faire une nouvelle exécution de l'algorithme ? (o/n) : ").lower().strip()
-            if reponse in ['o', 'oui', 'y', 'yes']:
-                continuer = True
-                break
-            elif reponse in ['n', 'non', 'no']:
-                continuer = False
-                break
-            else:
-                print("Veuillez répondre par 'o' (oui) ou 'n' (non)")
-        except (EOFError, KeyboardInterrupt):
-            continuer = False
-            break
-bloxplot(state_log)
+# (optionnel) pour vérifier :
+print(time_windows)
+print(service_times)
+
+# ALNS
+debut = time.perf_counter()
+tracemalloc.start()
+state_final = alns(
+    initial_routes=routes,
+    coords=coords,
+    metric="euclidienne",
+    n_iter=1500,
+    q_remove=7,
+    demandes=get_demands_dict(instance),
+    capacite=instance["capacity"],
+    contraintes={
+        "time_windows": time_windows,
+        "service_times": service_times
+    },
+    seed=42,
+    log=100,
+    max_time=300
+)
+
+print("Coût final       :", state_final["C"])
+print("Meilleur global :", state_final["C_best"])
+print("Écart (%)    :", gap(state_final["C_best"], choix_fichier))
+
+fin = time.perf_counter()
+print("Temps d'exécution :", fin - debut, "secondes")
+current, peak = tracemalloc.get_traced_memory()
+print(f"Mémoire actuelle : {current / 1024:.2f} Ko")
+
+tracer_vrp(instance, state_final["S_best"], titre="ALNS: meilleure solution")
