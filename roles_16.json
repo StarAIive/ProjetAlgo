@@ -1,0 +1,62 @@
+{
+    "1": {
+        "role": "COLLECTE",
+        "type": 1
+    },
+    "2": {
+        "role": "COLLECTE",
+        "type": 2
+    },
+    "3": {
+        "role": "COLLECTE",
+        "type": 3
+    },
+    "4": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "5": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "6": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "7": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "8": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "9": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "10": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "11": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "12": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "13": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "14": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "15": {
+        "role": "CLIENT",
+        "type": 3
+    }
+}

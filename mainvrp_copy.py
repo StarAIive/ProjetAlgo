@@ -6,6 +6,7 @@ import random
 import time
 import tracemalloc
 import vrplib
+import json
 
 # MENU PRINCIPAL
 
@@ -108,6 +109,21 @@ def get_coords_dict(instance):
         coords[i] = (instance['node_coord'][i][0], instance['node_coord'][i][1])
     return coords
 
+def rolesGen(n):
+    roles = {}
+
+    # Points de collecte
+    for i in range(1, 4):
+        roles[i] = {"role": "COLLECTE", "type": i}
+ 
+    # Clients
+    for i in range(4, n):
+        roles[i] = {"role": "CLIENT", "type": random.randint(1, 3)}
+    # Écriture dans un fichier JSON
+    with open(f"roles_{n}.json", "w") as f:
+        json.dump(roles, f, indent=4)
+
+
 def get_demands_dict(instance):
     """Convertit les demandes VRPLib (numpy array) en dictionnaire pour compatibilité"""
     demands = {}
@@ -117,59 +133,60 @@ def get_demands_dict(instance):
 
 def solution_initiale(instance):
     """
-    Génère une solution initiale en utilisant une heuristique simple avec les données VRPLib.
+    Génère une solution initiale en respectant les capacités.
+    Chaque route part du dépôt, passe par le point de collecte du type, visite des clients,
+    puis retourne au dépôt.
     """
-    depot = instance["depot"][0]  # Index du dépôt (généralement 0)
-    demand = instance["demand"]   # Numpy array des demandes
-    capacity = instance["capacity"]  # Capacité des véhicules
-    n = instance["dimension"]     # Nombre de nœuds
-    
-    # Les clients sont tous les nœuds sauf le dépôt
-    clients = []
-    i = 0
-    while i < n:
-        if i != depot:
-            clients.append(i)
-        i += 1
+    depot = instance["depot"][0]
+    demand = instance["demand"]
+    capacity = instance["capacity"]
+    n = instance["dimension"]
 
-    
-    tour = [depot]
-    p = 0
-    demande = 0
-    while p < len(clients):
-        client_demande = demand[clients[p]]
-        demande += client_demande
-        if capacity is not None and demande > capacity:
-            tour.append(depot)
-            demande = client_demande  # Commencer nouvelle route avec ce client
-            tour.append(clients[p])
-            p += 1
-        else:
-            tour.append(clients[p])
-            p += 1
-    tour.append(depot)
-    
-    # Convertir le tour en routes
+    rolesGen(n)
+
+    with open(f"roles_{n}.json", "r") as f:
+        roles = json.load(f)
+        roles = {int(k): v for k, v in roles.items()}
+
+    clients_by_type = {}
+    collectes_by_type = {}
+
+    for node, info in roles.items():
+        if info["role"] == "CLIENT":
+            clients_by_type.setdefault(info["type"], []).append(int(node))
+        elif info["role"] == "COLLECTE":
+            collectes_by_type[info["type"]] = int(node)
+
     routes = []
-    courants = []
-    i = 0
-    n_tour = len(tour)
-    while i < n_tour:
-        v = tour[i]
-        if v == depot:
-            if len(courants) > 0:
-                # Fermer la route: [depot] + clients + [depot]
-                route = [depot]
-                j = 0
-                while j < len(courants):
-                    route.append(courants[j])
-                    j += 1
-                route.append(depot)
-                routes.append(route)
-                courants = []
-        else:
-            courants.append(v)
-        i += 1
+
+    for t, clients in clients_by_type.items():
+        collecte = collectes_by_type.get(t)
+        if collecte is None:
+            print(f"Aucun point de collecte défini pour le type {t}")
+            continue
+
+        clients_restants = clients.copy()
+
+        while clients_restants:
+            demande_courante = 0
+            route = [depot, collecte]  # départ dépôt → collecte
+
+            i = 0
+            while i < len(clients_restants):
+                c = int(clients_restants[i])
+                # Correction ici : c-1 si demand est indexé à partir de 0
+                if c - 1 < len(demand) and demande_courante + demand[c - 1] <= capacity:
+                    route.append(c)
+                    demande_courante += demand[c - 1]
+                    clients_restants.pop(i)
+                else:
+                    i += 1
+
+            # Retour : collecte → dépôt
+            route.append(collecte)
+            route.append(depot)
+            routes.append(route)
+
     return routes
 
 def cout_total(routes, coords, metric="euclidienne"):
@@ -239,203 +256,218 @@ def selection_op(scores):
     op_repare = random.choices(list(proba_reparation.keys()), weights=list(proba_reparation.values()))[0]
     return op_destruct, op_repare
 
-def worst_removal(routes, coords, q=2, metric="manhattan"):
+def worst_removal(routes, coords, roles, q=2, metric="manhattan"):
     """
-    Retire q clients impliqués dans les arêtes les plus coûteuses (Worst Removal - ALNS)
-    en évitant les dépôts.
+    Retire q clients impliqués dans les arêtes les plus coûteuses,
+    tout en respectant la contrainte "collecte avant livraison".
     """
-    # Déterminer les dépôts présents dans la solution (tête/fin de chaque route)
     depot_ids = set()
     for route in routes:
         if route:
             depot_ids.add(route[0])
             depot_ids.add(route[-1])
 
-    # Lister toutes les arêtes (u,v) en ignorant celles qui touchent un dépôt
+    # Lister toutes les arêtes non-dépôts
     edges = []
     for route in routes:
         n = len(route)
-        i = 0
-        while i < n - 1:
-            u = route[i]
-            v = route[i + 1]
+        for i in range(n - 1):
+            u, v = route[i], route[i + 1]
             if (u not in depot_ids) and (v not in depot_ids):
                 edges.append((u, v))
-            i += 1
 
-    # Calculer le coût de chaque arête
+    # Calculer les coûts des arêtes
     costs = []
     for (u, v) in edges:
         x1, y1 = coords[u]
         x2, y2 = coords[v]
-        if metric == "manhattan":
-            dist = abs(x1 - x2) + abs(y1 - y2)
-        else:
-            dist = math.hypot(x1 - x2, y1 - y2)
+        dist = abs(x1 - x2) + abs(y1 - y2) if metric == "manhattan" else math.hypot(x1 - x2, y1 - y2)
         costs.append((u, v, dist))
 
-    # Trier par coût décroissant
+    # Trier décroissant
     costs.sort(key=lambda t: t[2], reverse=True)
 
-    # Sélectionner jusqu'à q clients (non dépôts), uniques, en parcourant les pires arêtes
-    clients_a_retirer = []
+    clients_a_retirer = set()
     for (u, v, _) in costs:
-        if u not in depot_ids and (u not in clients_a_retirer):
-            clients_a_retirer.append(u)
-            if len(clients_a_retirer) >= q:
-                break
-        if v not in depot_ids and (len(clients_a_retirer) < q) and (v not in clients_a_retirer):
-            clients_a_retirer.append(v)
-            if len(clients_a_retirer) >= q:
-                break
+        for node in (u, v):
+            if node not in depot_ids and len(clients_a_retirer) < q:
+                clients_a_retirer.add(node)
 
-    # Si q > clients disponibles, délimiter la liste
-    if len(clients_a_retirer) > q:
-        clients_a_retirer = clients_a_retirer[:q]
+    # Étendre la liste selon la contrainte collecte/livraison
+    full_to_remove = set(clients_a_retirer)
+    for node in list(clients_a_retirer):
+        role = roles[node]["role"]
+        type_ = roles[node]["type"]
 
-    # Retirer ces clients des routes (en conservant l'ordre et en préservant les dépôts)
+        if role == "client":
+            # Retirer aussi la collecte correspondante
+            for k, v in roles.items():
+                if v["role"] == "collecte" and v["type"] == type_:
+                    full_to_remove.add(k)
+
+        elif role == "collecte":
+            # Retirer aussi les clients qui en dépendent
+            for k, v in roles.items():
+                if v["role"] == "client" and v["type"] == type_:
+                    full_to_remove.add(k)
+
+    # Supprimer les nœuds sélectionnés
+    new_routes = []
+    for route in routes:
+        new_route = [c for c in route if (c in depot_ids) or (c not in full_to_remove)]
+        new_routes.append(new_route)
+
+    return new_routes, list(full_to_remove)
+
+def random_removal(routes, coords, roles, q=2, metric="manhattan"):
+    """
+    Retire aléatoirement q clients (hors dépôts et hors points de collecte)
+    en respectant la contrainte de type (définie dans 'roles').
+    Retourne (routes_modifiées, clients_supprimés).
+    """
+
+    # Identifier les dépôts (tête/fin de chaque route)
+    depots = set()
+    for route in routes:
+        if route:
+            depots.add(route[0])
+            depots.add(route[-1])
+
+    # Identifier les points de collecte (à partir du dictionnaire roles)
+    points_collecte = set()
+    for node_id, role_data in roles.items():
+        if role_data["role"] == "collecte":
+            points_collecte.add(int(node_id))
+
+    # Créer une liste des clients éligibles à suppression
+    pool = []
+    for route in routes:
+        for client in route:
+            # On évite les dépôts et les points de collecte
+            if (client not in depots) and (client not in points_collecte):
+                pool.append(client)
+
+    # Si aucun client n’est supprimable
+    if not pool:
+        new_routes = [route[:] for route in routes]
+        return new_routes, []
+
+    # Choisir aléatoirement jusqu’à q clients à retirer
+    k = min(q, len(pool))
+    removed = random.sample(pool, k)
+
+    # Construire les nouvelles routes (sans les clients retirés)
     new_routes = []
     for route in routes:
         new_route = []
         for client in route:
-            if (client in depot_ids) or (client not in clients_a_retirer):
+            # On conserve les dépôts, les points de collecte et les clients non retirés
+            if (client in depots) or (client in points_collecte) or (client not in removed):
                 new_route.append(client)
         new_routes.append(new_route)
 
-    return new_routes, clients_a_retirer
-
-def random_removal(routes, coords, q=2, metric="manhattan"):
-    """
-    Retire aléatoirement q clients (hors dépôts) de l'ensemble des routes.
-    Retourne (routes_partial, removed).
-    """
-    # Collecter dépôts (tête/fin de chaque route)
-    depots = set()
-    for r in routes:
-        if r:
-            depots.add(r[0]); depots.add(r[-1])
-
-    # Lister tous les clients retirables (non dépôts)
-    pool = []
-    r_idx = 0
-    while r_idx < len(routes):
-        route = routes[r_idx]
-        i = 1
-        while i < len(route) - 1:
-            pool.append(route[i])
-            i += 1
-        r_idx += 1
-
-    if not pool:
-        routes_copy = []
-        for rt in routes:
-            routes_copy.append(rt[:])
-
-        return routes_copy, []
-
-    # Échantillonner sans remise au plus q
-    k = min(q, len(pool))
-    removed = random.sample(pool, k)
-
-    # Construire les nouvelles routes (on enlève removed, on garde dépôts)
-    new_routes = []
-    r_idx = 0
-    while r_idx < len(routes):
-        route = routes[r_idx]
-        new_r = []
-        j = 0
-        while j < len(route):
-            v = route[j]
-            if (v in depots) or (v not in removed):
-                new_r.append(v)
-            j += 1
-        new_routes.append(new_r)
-        r_idx += 1
-
     return new_routes, removed
 
-def shaw_removal(routes, coords, q=2, metric="euclidienne"):
+def shaw_removal(routes, coords, roles, q=2, metric="euclidienne"):
     """
-    Shaw removal : retire q clients similaires (proches géographiquement).
-    Plus efficace pour les grandes instances.
+    Shaw removal : retire q clients similaires (proches géographiquement)
+    en respectant la contrainte de type (points de collecte intouchables).
     """
-    # Collecter dépôts
+    # --- Étape 1 : Identifier dépôts et points de collecte ---
     depots = set()
     for r in routes:
         if r:
-            depots.add(r[0]); depots.add(r[-1])
+            depots.add(r[0])
+            depots.add(r[-1])
 
-    # Lister tous les clients retirables (non dépôts)
+    points_collecte = set()
+    for node_id, role_data in roles.items():
+        if role_data["role"] == "collecte":
+            points_collecte.add(int(node_id))
+
+    # --- Étape 2 : Lister les clients retirables ---
     pool = []
     for route in routes:
-        for i in range(1, len(route) - 1):
-            if route[i] not in depots:
-                pool.append(route[i])
+        for client in route:
+            if (client not in depots) and (client not in points_collecte):
+                pool.append(client)
 
     if not pool or q <= 0:
-        routes_copy = []
-        i = 0
-        while i < len(routes):
-            # copie d'une route
-            route_originale = routes[i]
-            
-            route_copie = []
-            j = 0
-            while j < len(route_originale):
-                route_copie.append(route_originale[j])
-                j += 1
-            
-            routes_copy.append(route_copie)
-            i += 1
+        # Retourne une copie identique si rien n'est retirable
+        new_routes = [route[:] for route in routes]
+        return new_routes, []
 
-        return routes_copy, []
-
-    # Choisir un client de départ aléatoirement
+    # --- Étape 3 : Choisir un client de départ (seed) ---
     seed_client = random.choice(pool)
     removed = [seed_client]
-    
-    # Ajouter les q-1 clients les plus proches du seed
+
+    # --- Étape 4 : Trouver les clients les plus similaires (géographiquement proches) ---
     while len(removed) < q and len(removed) < len(pool):
         best_dist = float("inf")
         best_client = None
-        
+
         for client in pool:
             if client not in removed:
-                # Distance minimale au cluster déjà sélectionné
-                min_dist_to_cluster = min(
-                    math.hypot(coords[client][0] - coords[selected][0],
-                              coords[client][1] - coords[selected][1])
-                    for selected in removed
-                )
-                
+                # Calculer la distance minimale au cluster des clients déjà choisis
+                if metric == "euclidienne":
+                    min_dist_to_cluster = min(
+                        math.hypot(coords[client][0] - coords[selected][0],
+                                   coords[client][1] - coords[selected][1])
+                        for selected in removed
+                    )
+                else:  # fallback manhattan
+                    min_dist_to_cluster = min(
+                        abs(coords[client][0] - coords[selected][0]) +
+                        abs(coords[client][1] - coords[selected][1])
+                        for selected in removed
+                    )
+
                 if min_dist_to_cluster < best_dist:
                     best_dist = min_dist_to_cluster
                     best_client = client
-        
+
         if best_client is not None:
             removed.append(best_client)
         else:
             break
 
-    # Construire les nouvelles routes
+    # --- Étape 5 : Construire les nouvelles routes sans les clients supprimés ---
     new_routes = []
     for route in routes:
         new_route = []
         for client in route:
-            if (client in depots) or (client not in removed):
+            if (client in depots) or (client in points_collecte) or (client not in removed):
                 new_route.append(client)
         new_routes.append(new_route)
 
     return new_routes, removed
 
-def delta_insertion(route, idx, node, coords, metric="manhattan"):
+def delta_insertion(route, idx, node, coords, roles, metric="manhattan"):
     """
     Δ = d(a,node) + d(node,b) - d(a,b), avec a = route[idx], b = route[idx+1]
+    Ajoute une contrainte : un client ne peut être inséré que
+    si un point de collecte de même type existe avant lui sur la route.
     """
     a = route[idx]
     b = route[idx + 1]
     ax, ay = coords[a]; nx, ny = coords[node]; bx, by = coords[b]
 
+    # --- Vérification du type et des rôles ---
+    node_type = roles[str(node)]["type"]
+    node_role = roles[str(node)]["role"]
+
+    # Si c'est un client → vérifier qu'il y a bien un point de collecte du même type avant dans la route
+    if node_role == "client":
+        collecte_presente = False
+        for prev in route[:idx + 1]:
+            if roles[str(prev)]["role"] == "collecte" and roles[str(prev)]["type"] == node_type:
+                collecte_presente = True
+                break
+        if not collecte_presente:
+            # Insertion interdite : on retourne un coût très élevé
+            return float("inf")
+
+    # --- Calcul classique du delta ---
     if metric == "manhattan":
         delta = (abs(ax - nx) + abs(ay - ny)) + (abs(nx - bx) + abs(ny - by)) - (abs(ax - bx) + abs(ay - by))
     else:
@@ -444,60 +476,75 @@ def delta_insertion(route, idx, node, coords, metric="manhattan"):
     return delta
 
 
-def insertion_faisable(route, idx, node, demandes=None, capacite=None, contraintes=None):
+def insertion_faisable(route, idx, node, demandes=None, capacite=None, roles=None, contraintes=None):
     """
-    Faisabilité minimale : capacité par route (les dépôts sont aux extrémités).
+    Vérifie si l'insertion d'un nœud (client ou collecte) dans une route est faisable.
+    Contrainte ajoutée :
+      - Un client ne peut être inséré que s'il existe déjà un point de collecte du même type
+        avant sa position dans la route.
     """
+
+    # --- Vérification capacité (comme avant) ---
     if demandes is not None and capacite is not None:
         charge = 0
-        i = 1
-        while i < len(route) - 1:  # ignorer dépôts
+        for i in range(1, len(route) - 1):  # on ignore dépôts
             client = route[i]
             charge += demandes.get(client, 0)
-            i += 1
         charge += demandes.get(node, 0)
         if charge > capacite:
-            return False
+            return False  # insertion impossible, dépasse capacité
 
-    # (extensions TW/compatibilité plus tard via `contraintes`)
+    # --- Vérification contrainte collecte avant livraison ---
+    if roles is not None and str(node) in roles:
+        node_role = roles[str(node)]["role"]
+        node_type = roles[str(node)]["type"]
+
+        if node_role == "client":
+            collecte_presente = False
+            # Vérifier dans les nœuds avant l'insertion
+            for prev in route[:idx + 1]:
+                if str(prev) in roles:
+                    if roles[str(prev)]["role"] == "collecte" and roles[str(prev)]["type"] == node_type:
+                        collecte_presente = True
+                        break
+
+            if not collecte_presente:
+                # Aucun point de collecte compatible avant → insertion interdite
+                return False
+
+    # (Plus tard, ici on pourra ajouter d'autres contraintes via `contraintes`)
     return True
 
 
 def reparation_greedy(routes_partial, removed, coords, metric="manhattan",
-                      demandes=None, capacite=None, contraintes=None, ordre="as_is"):
+                      demandes=None, capacite=None, roles=None, contraintes=None, ordre="as_is"):
     """
-    Réinsère toutes les villes de `removed` en mode Greedy (Δ minimal successif).
-    Chaque client est inséré à la meilleure position (Δ minimal) sur l’ensemble des routes.
-    """
-    routes_modifiees = []
-    for rt in routes_partial:
-        routes_modifiees.append(rt[:])
+    Réinsère toutes les villes de `removed` en mode Greedy (Δ minimal successif),
+    en respectant la contrainte : une livraison (client) ne peut être insérée
+    qu’après une collecte du même type déjà présente dans la route.
 
+    Chaque nœud retiré est inséré à la position faisable avec le plus petit Δ
+    sur l’ensemble des routes.
+    """
+    routes_modifiees = [rt[:] for rt in routes_partial]
     delta_total = 0.0
     non_inseres = []
+
+    # Ordre des nœuds à réinsérer
     ordre_effectif = list(removed)
 
     for node in ordre_effectif:
         delta_best = float("inf")
         choix_best = (None, None)  # (r_idx, idx)
 
-        # Recherche du meilleur emplacement faisable pour ce client
+        # Recherche du meilleur emplacement faisable
         for r_idx, route in enumerate(routes_modifiees):
             for i in range(len(route) - 1):
-                if insertion_faisable(route, i, node, demandes, capacite, contraintes):
-                    # Calcul du coût d’insertion
-                    a = route[i]
-                    b = route[i + 1]
-                    ax, ay = coords[a]
-                    bx, by = coords[b]
-                    nx, ny = coords[node]
+                if insertion_faisable(route, i, node, demandes, capacite, roles, contraintes):
+                    # Calcul du coût d’insertion via delta_insertion()
+                    delta = delta_insertion(route, i, node, coords, metric)
 
-                    if metric == "manhattan":
-                        delta = (abs(ax - nx) + abs(ay - ny)) + (abs(nx - bx) + abs(ny - by)) - (abs(ax - bx) + abs(ay - by))
-                    else:
-                        delta = (math.hypot(ax - nx, ay - ny) + math.hypot(nx - bx, ny - by) - math.hypot(ax - bx, ay - by))
-
-                    # Meilleur emplacement trouvé ?
+                    # Sélection du meilleur emplacement
                     if delta < delta_best:
                         delta_best = delta
                         choix_best = (r_idx, i)
@@ -510,114 +557,45 @@ def reparation_greedy(routes_partial, removed, coords, metric="manhattan",
         # Appliquer l’insertion optimale
         r, i = choix_best
         routes_modifiees[r].insert(i + 1, node)
-        if delta_best is None:
-            delta_total += 0.0
-        else:
-            delta_total += delta_best
+        delta_total += delta_best if delta_best is not None else 0.0
+
     return routes_modifiees, non_inseres, delta_total
 
 def best_reparation(routes_partial, removed, coords, metric="manhattan",
-                demandes=None, capacite=None, contraintes=None, ordre="sorted_by_cost"):
+                    demandes=None, capacite=None, roles=None, contraintes=None, ordre="sorted_by_cost"):
     """
-    Réinsère en triant les villes par coût d'insertion croissant (best insertion).
+    Réinsère les villes en triant par coût d'insertion croissant (best insertion),
+    tout en respectant la contrainte :
+    une livraison (client) ne peut être insérée qu’après une collecte du même type
+    déjà présente dans la route.
     """
-    routes_modifiees = []
-    for rt in routes_partial:
-        routes_modifiees.append(rt[:])
-
+    routes_modifiees = [rt[:] for rt in routes_partial]
     delta_total = 0.0
     non_inseres = []
-    
+
     # Pour chaque ville à insérer
     for u in removed:
         best_cost = float("inf")
         best_pos = None
-        
+
         # Chercher la meilleure position parmi toutes les routes
         for r_idx, route in enumerate(routes_modifiees):
             for i in range(len(route) - 1):
-                if insertion_faisable(route, i, u, demandes, capacite, contraintes):
+                # Vérifie faisabilité (capacité + contrainte de type)
+                if insertion_faisable(route, i, u, demandes, capacite, roles, contraintes):
                     delta = delta_insertion(route, i, u, coords, metric)
                     if delta < best_cost:
                         best_cost = delta
                         best_pos = (r_idx, i)
-        
+
+        # Si une insertion faisable existe
         if best_pos is not None:
             r_idx, i = best_pos
             routes_modifiees[r_idx].insert(i + 1, u)
             delta_total += best_cost
         else:
             non_inseres.append(u)
-    
-    return routes_modifiees, non_inseres, delta_total
 
-def regret_reparation(routes_partial, removed, coords, metric="manhattan",
-                     demandes=None, capacite=None, contraintes=None, regret_level=2):
-    """
-    Réinsère les villes en utilisant l'heuristique de regret.
-    Le regret d'un client est la différence entre son meilleur coût d'insertion
-    et son second meilleur coût d'insertion (ou n-ème meilleur selon regret_level).
-    On insère en priorité le client avec le plus grand regret.
-    """
-    routes_modifiees = []
-    for rt in routes_partial:
-        routes_modifiees.append(rt[:])
-
-    delta_total = 0.0
-    non_inseres = []
-    remaining = list(removed)
-    
-    while remaining:
-        best_regret = -1
-        best_client = None
-        best_insertion = None
-        
-        # Calculer le regret pour chaque client restant
-        for client in remaining:
-            # Trouver tous les coûts d'insertion possibles pour ce client
-            insertion_costs = []
-            
-            for r_idx, route in enumerate(routes_modifiees):
-                for i in range(len(route) - 1):
-                    if insertion_faisable(route, i, client, demandes, capacite, contraintes):
-                        delta = delta_insertion(route, i, client, coords, metric)
-                        insertion_costs.append((delta, r_idx, i))
-            
-            if len(insertion_costs) == 0:
-                # Aucune insertion possible pour ce client
-                continue
-            
-            # Trier par coût croissant
-            insertion_costs.sort(key=lambda x: x[0])
-            
-            # Calculer le regret
-            if len(insertion_costs) >= regret_level:
-                regret = insertion_costs[regret_level - 1][0] - insertion_costs[0][0]
-            else:
-                # Si moins de positions que regret_level, utiliser la différence max
-                if len(insertion_costs) > 1:
-                    regret = insertion_costs[-1][0] - insertion_costs[0][0]
-                else:
-                    regret = insertion_costs[0][0]
-
-            
-            # Garder le client avec le plus grand regret
-            if regret > best_regret:
-                best_regret = regret
-                best_client = client
-                best_insertion = insertion_costs[0]  # Meilleure position pour ce client
-        
-        # Si aucun client ne peut être inséré
-        if best_client is None:
-            non_inseres.extend(remaining)
-            break
-        
-        # Insérer le client avec le plus grand regret à sa meilleure position
-        cost, r_idx, i = best_insertion
-        routes_modifiees[r_idx].insert(i + 1, best_client)
-        delta_total += cost
-        remaining.remove(best_client)
-    
     return routes_modifiees, non_inseres, delta_total
 
 def acceptation_regle(delta, T, mode="sa", epsilon=0.0):
@@ -644,6 +622,71 @@ def acceptation_regle(delta, T, mode="sa", epsilon=0.0):
 
     # Par défaut : refuser
     return False
+
+def regret_reparation(routes_partial, removed, coords, metric="manhattan",
+                      demandes=None, capacite=None, roles=None, contraintes=None, regret_level=2):
+    """
+    Réinsère les villes en utilisant l’heuristique du regret,
+    tout en respectant la contrainte :
+    une livraison (client) ne peut être insérée qu’après une collecte
+    du même type déjà présente dans la route.
+
+    Le regret d’un client = différence entre son meilleur et son n-ième meilleur coût d’insertion.
+    On insère en priorité le client avec le plus grand regret.
+    """
+    routes_modifiees = [rt[:] for rt in routes_partial]
+    delta_total = 0.0
+    non_inseres = []
+    remaining = list(removed)
+
+    while remaining:
+        best_regret = -1
+        best_client = None
+        best_insertion = None
+
+        # Calculer le regret pour chaque client restant
+        for client in remaining:
+            insertion_costs = []
+
+            # Toutes les positions d’insertion faisables
+            for r_idx, route in enumerate(routes_modifiees):
+                for i in range(len(route) - 1):
+                    if insertion_faisable(route, i, client, demandes, capacite, roles, contraintes):
+                        delta = delta_insertion(route, i, client, coords, metric)
+                        insertion_costs.append((delta, r_idx, i))
+
+            if not insertion_costs:
+                continue
+
+            # Trier par coût d’insertion croissant
+            insertion_costs.sort(key=lambda x: x[0])
+
+            # Calcul du regret
+            if len(insertion_costs) >= regret_level:
+                regret = insertion_costs[regret_level - 1][0] - insertion_costs[0][0]
+            elif len(insertion_costs) > 1:
+                regret = insertion_costs[-1][0] - insertion_costs[0][0]
+            else:
+                regret = insertion_costs[0][0]
+
+            # Meilleur client à insérer selon le regret
+            if regret > best_regret:
+                best_regret = regret
+                best_client = client
+                best_insertion = insertion_costs[0]  # Meilleur coût
+
+        # Si aucun client n’est insérable
+        if best_client is None:
+            non_inseres.extend(remaining)
+            break
+
+        # Insérer le client avec le plus grand regret à la meilleure position
+        cost, r_idx, i = best_insertion
+        routes_modifiees[r_idx].insert(i + 1, best_client)
+        delta_total += cost
+        remaining.remove(best_client)
+
+    return routes_modifiees, non_inseres, delta_total
 
 def appli_acceptation(state, candidate, selected_ops, T, params, scores):
     """
@@ -773,28 +816,29 @@ def refroidissement(T, params):
 
 def alns_iteration(state, coords, metric, T, params, scores,
                    op_remove, op_repair, remove_func, repair_func, q_remove,
-                   demandes=None, capacite=None, contraintes=None):
+                   roles, demandes=None, capacite=None, contraintes=None):
     """
     Orchestration d'une itération ALNS :
     - destruction -> réparation -> coût -> acceptation -> MAJ T/poids
-    `remove_func` et `repair_func` sont des fonctions OPÉRATEUR-SPÉCIFIQUES.
+    remove_func et repair_func sont des fonctions opérateur-spécifiques.
+    roles : dictionnaire roles (node -> {"role":..., "type":...})
     """
-
-    # Destruction
+    # Destruction (remove_func doit accepter roles en 3e paramètre)
     routes_partial, removed = remove_func(
-        state["S"], coords, q_remove, metric
+        state["S"], coords, roles, q_remove, metric
     )
 
-    # Réparation 
+    # Réparation (repair_func doit accepter roles dans kwargs)
     routes_candidate, non_inseres, _ = repair_func(
         routes_partial, removed, coords, metric,
-        demandes=demandes, capacite=capacite, contraintes=contraintes
+        demandes=demandes, capacite=capacite, roles=roles, contraintes=contraintes
     )
 
+    # Si la réparation n'a pas pu réinsérer tous les clients -> rejet
     if non_inseres:
         return state, T, scores, "rejected"
 
-    #Coût candidat
+    # Coût candidat
     C_new = cout_total(routes_candidate, coords, metric)
 
     # Candidate dict
@@ -807,7 +851,8 @@ def alns_iteration(state, coords, metric, T, params, scores,
 
     return new_state, T, scores, outcome
 
-def alns(initial_routes, coords,
+
+def alns(initial_routes, coords, roles,
          metric="manhattan",
          n_iter=500,
          q_remove=2,
@@ -819,6 +864,7 @@ def alns(initial_routes, coords,
          max_time=None):
     """
     Lance l'ALNS sur une solution initiale.
+    roles : dictionnaire des rôles (obligatoire pour respecter la contrainte collecte->client)
     Retourne l'état final (incluant le meilleur global).
     """
 
@@ -828,38 +874,34 @@ def alns(initial_routes, coords,
     if seed is not None:
         random.seed(seed)
 
-    # Opérateurs disponibles - ajout de diversité
+    # Opérateurs disponibles
     remove_ops = ["worst", "random", "shaw"]
     insert_ops = ["greedy", "best", "regret"]
 
-    # Init scores & params
+    # Init scores & params (ton code existant)
     scores, params = init_scores_et_param(remove_ops, insert_ops)
 
-    # Température initiale élevée mais optimisée pour convergence rapide
-    T = 200.0 
+    # Température initiale
+    T = 200.0
 
-    # État courant
-    S0 = []
-    for rt in initial_routes:
-        S0.append(rt[:])
+    # État courant (copies profondes des routes)
+    S0 = [rt[:] for rt in initial_routes]
     C0 = cout_total(S0, coords, metric)
     state = {
-        "S": S0,
+        "S": [rt[:] for rt in S0],
         "C": C0,
-        "S_best": [],
+        "S_best": [rt[:] for rt in S0],
+        "C_best": C0
     }
-    for rt in S0:
-        state["S_best"].append(rt[:])
-    state["C_best"] = C0
 
-    # Dictionnaires d’opérateurs -> fonctions
+    # Dictionnaires d’opérateurs -> fonctions (les wrappers passent 'roles')
     remove_funcs = {
-        "worst": lambda routes, coords, q, metric:
-            worst_removal(routes, coords, q=q, metric=metric),
-        "random": lambda routes, coords, q, metric:
-            random_removal(routes, coords, q=q, metric=metric),
-        "shaw": lambda routes, coords, q, metric:
-            shaw_removal(routes, coords, q=q, metric=metric),
+        "worst": lambda routes, coords, roles, q, metric:
+            worst_removal(routes, coords, roles, q=q, metric=metric),
+        "random": lambda routes, coords, roles, q, metric:
+            random_removal(routes, coords, roles, q=q, metric=metric),
+        "shaw": lambda routes, coords, roles, q, metric:
+            shaw_removal(routes, coords, roles, q=q, metric=metric),
     }
     repair_funcs = {
         "greedy": lambda routes_partial, removed, coords, metric, **kw:
@@ -880,15 +922,14 @@ def alns(initial_routes, coords,
         remove_func = remove_funcs.get(op_remove)
         repair_func = repair_funcs.get(op_insert)
         if remove_func is None or repair_func is None:
-            # Opérateur inconnu -> on passe (sécurité)
             it += 1
             continue
 
-        # Une itération ALNS 
+        # 3 Une itération ALNS (on passe roles + paramètres globaux)
         state, T, scores, outcome = alns_iteration(
             state, coords, metric, T, params, scores,
             op_remove, op_insert, remove_func, repair_func, q_remove,
-            demandes=demandes, capacite=capacite, contraintes=contraintes
+            roles, demandes=demandes, capacite=capacite, contraintes=contraintes
         )
 
         # Vérification du temps limite
@@ -902,7 +943,6 @@ def alns(initial_routes, coords,
 
         it += 1
 
-    # 6) Retour
     return state
 
 def gap(cout, fichier_vrp):
@@ -1016,12 +1056,16 @@ coords = get_coords_dict(instance)
 routes = solution_initiale(instance)
 tracer_vrp(instance, routes, titre="Solution Initiale VRP")
 print("cout total de la solution initiale :", cout_total(routes, coords, metric="manhattan"))
+n = instance["dimension"]
+with open(f"roles_{n}.json", "r") as f:
+    roles = json.load(f)
+    roles = {int(k): v for k, v in roles.items()}
 
 # ALNS
 debut = time.perf_counter()
 tracemalloc.start()
 state_final = alns(
-    initial_routes=routes,
+    initial_routes=routes, roles=roles,
     coords=coords,
     metric="euclidienne", 
     n_iter=1500, 

@@ -6,11 +6,13 @@ import random
 import time
 import tracemalloc
 import vrplib
+from datetime import datetime
 
 # MENU PRINCIPAL
 
 choix = None
 dossier = "data"
+fact = 1.0  # Facteur de trafic par défaut
 
 while choix != 0 and choix != 1:
     try:
@@ -26,7 +28,7 @@ while choix != 0 and choix != 1:
 print(f"Mode sélectionné : {choix}")
 
 if choix == 0:
-    
+    dossier = "data"
     fichiers_vrp = glob.glob(os.path.join(dossier, "*.vrp"))
     if not fichiers_vrp:
         print("Aucun fichier .vrp trouvé dans le dossier data/")
@@ -50,7 +52,10 @@ if choix == 0:
         except ValueError:
             print("Erreur : veuillez entrer un nombre valide")
     print(f"\nFichier sélectionné : {nom_fichier}")
-
+    
+    # Charger l'instance VRP avec vrplib
+    instance = vrplib.read_instance(choix_fichier)
+    print(f"Instance chargée : {instance['dimension']} nœuds, capacité {instance['capacity']}")
 else:
 
     print("Mode 1 (contraintes supplémentaires) :")
@@ -59,7 +64,7 @@ else:
         try:
             print("Choisissez la contrainte :")
             print("0 -> Contraintes fenetre de temps")
-            print("1 -> Contraintes point de livraisons/collectes spécifique")
+            print("1 -> Contraintes facteur de traffic")
             print("2 -> Les deux contraintes")
             choix1 = int(input("Votre choix (0, 1 ou 2) : "))
             if choix1 != 0 and choix1 != 1 and choix1 != 2:
@@ -69,6 +74,33 @@ else:
             print(" Entrée invalide : veuillez entrer un nombre entier (0, 1 ou 2).")
 
     print(f"Contrainte sélectionnée : {choix1}")
+    choix2 = int(input("Choisissez le mode de trafic 0.Automatique, 1.Manuel : "))
+    if choix2 == 0:
+        """Retourne un facteur de trafic temporelle en fonction de l'heure de la journée"""
+        now = datetime.now()
+        h = now.hour
+        if 7 <= h < 9:
+            fact = 1.3  # Heure de pointe du matin
+        elif 9 <= h < 16:
+            fact = 1.0  # Heure normale de l'après-midi
+        elif 17 <= h < 20:
+            fact =  1.8  # Heure de pointe du soir
+        else:
+            fact = 0.8  # Autres heures
+    else:
+    
+        """Retourne un facteur de trafic temporelle entré manuellement par l'utilisateur"""
+
+        h = int(input("Entrez l'heure (0-23) : "))
+        if 7 <= h < 9:
+            fact = 1.3  # Heure de pointe du matin
+        elif 9 <= h < 16:
+            fact = 1.0  # Heure normale de l'après-midi
+        elif 17 <= h < 20:
+            fact = 1.8  # Heure de pointe du soir
+        else:
+            fact = 0.8  # Autres heures
+
 
     fichiers_vrp = glob.glob(os.path.join(dossier, "*.vrp"))
     if not fichiers_vrp:
@@ -93,126 +125,69 @@ else:
         except ValueError:
             print("Erreur : veuillez entrer un nombre valide")
         
-    print(f"\nFichier sélectionné : {nom_fichier}")
-    
-def lire_coordonnees(fichier):
+    # Charger l'instance VRP avec vrplib
+    instance = vrplib.read_instance(choix_fichier)
+    print(f"Instance chargée : {instance['dimension']} nœuds, capacité {instance['capacity']}")
+
+# Fonctions utilisant VRPLib remplacent les anciennes fonctions de lecture
+def get_coords_dict(instance):
+    """Convertit les coordonnées VRPLib (numpy array) en dictionnaire pour compatibilité"""
     coords = {}
-    with open(fichier, "r") as f:
-        lignes = f.readlines()
-    n = len(lignes)
-    i = 0
-    while i < n and "NODE_COORD_SECTION" not in lignes[i]:
-        i += 1
-    if i == n:
-        return coords
-    i += 1
-    while i < n and "DEMAND_SECTION" not in lignes[i] and "DEPOT_SECTION" not in lignes[i] and "EOF" not in lignes[i]:
-        parts = lignes[i].split()
-        if len(parts) >= 3:
-            numero = int(parts[0])
-            x = float(parts[1])
-            y = float(parts[2])
-            coords[numero] = (x, y)
-        i += 1
+    for i in range(instance['dimension']):
+        coords[i] = (instance['node_coord'][i][0], instance['node_coord'][i][1])
     return coords
 
-def lire_depots(fichier):
-    depots = []
-    with open(fichier, "r") as f:
-        lignes = f.readlines()
-    n = len(lignes)
-    i = 0
-    while i < n and "DEPOT_SECTION" not in lignes[i]:
-        i += 1
-    if i == n:
-        return depots
-    i += 1
-    while i < n:
-        line = lignes[i].strip()
-        if line == "-1" or line == "EOF" or line == "":
-            break
-        depots.append(int(line.split()[0]))
-        i += 1
-    return depots
+def get_demands_dict(instance):
+    """Convertit les demandes VRPLib (numpy array) en dictionnaire pour compatibilité"""
+    demands = {}
+    for i in range(instance['dimension']):
+        demands[i] = instance['demand'][i]
+    return demands
 
-def lire_demandes(fichier):
-    demandes = {}
-    with open(fichier, "r") as f:
-        lignes = f.readlines()
-    n = len(lignes)
-    i = 0
-    while i < n and "DEMAND_SECTION" not in lignes[i]:
-        i += 1
-    if i == n:
-        return demandes
-    i += 1
-    while i < n:
-        line = lignes[i].strip()
-        if line == "-1" or line == "EOF" or line.startswith("DEPOT_SECTION"):
-            break
-        parts = line.split()
-        if len(parts) >= 2:
-            numero = int(parts[0])
-            demande = int(parts[1])
-            demandes[numero] = demande
-        i += 1
-    return demandes
-
-def lire_capacite(fichier):
-    with open(fichier, "r") as f:
-        lignes = f.readlines()
-    for line in lignes:
-        if "CAPACITY" in line:
-            parts = line.split(":")
-            if len(parts) >= 2:
-                try:
-                    return int(parts[1].strip())
-                except ValueError:
-                    return None
-    return None
-
-def solution_initiale(fichier):
-    coords = lire_coordonnees(fichier)
-    depots = lire_depots(fichier)
-    demandes = lire_demandes(fichier)
-    capacite = lire_capacite(fichier)
-    if not depots:
-        print("Aucun dépôt trouvé.")
-        return []
-    depot = depots[0]
-
+def solution_initiale(instance):
+    """
+    Génère une solution initiale en utilisant une heuristique simple avec les données VRPLib.
+    """
+    depot = instance["depot"][0]  # Index du dépôt (généralement 0)
+    demand = instance["demand"]   # Numpy array des demandes
+    capacity = instance["capacity"]  # Capacité des véhicules
+    n = instance["dimension"]     # Nombre de nœuds
+    
+    # Les clients sont tous les nœuds sauf le dépôt
     clients = []
-    for i in coords.keys():
-        est_depot = False
-        for d in depots:
-            if i == d:
-                est_depot = True
-                break
-        if not est_depot:
+    i = 0
+    while i < n:
+        if i != depot:
             clients.append(i)
+        i += 1
 
+    
     tour = [depot]
     p = 0
     demande = 0
     while p < len(clients):
-        if clients[p] in demandes:
-            demande += demandes[clients[p]]
-            if capacite is not None and demande > capacite:
-                tour.append(depot)
-                demande = 0
-            else:
-                tour.append(clients[p])
-                p += 1
+        client_demande = demand[clients[p]]
+        demande += client_demande
+        if capacity is not None and demande > capacity:
+            tour.append(depot)
+            demande = client_demande  # Commencer nouvelle route avec ce client
+            tour.append(clients[p])
+            p += 1
+        else:
+            tour.append(clients[p])
+            p += 1
     tour.append(depot)
+    
+    # Convertir le tour en routes
     routes = []
     courants = []
     i = 0
-    n = len(tour)
-    while i < n:
+    n_tour = len(tour)
+    while i < n_tour:
         v = tour[i]
         if v == depot:
             if len(courants) > 0:
-                # on close la route: [depot] + clients + [depot]
+                # Fermer la route: [depot] + clients + [depot]
                 route = [depot]
                 j = 0
                 while j < len(courants):
@@ -221,7 +196,6 @@ def solution_initiale(fichier):
                 route.append(depot)
                 routes.append(route)
                 courants = []
-            # sinon: dépôt isolé -> on ignore (c'est juste une frontière)
         else:
             courants.append(v)
         i += 1
@@ -242,7 +216,7 @@ def cout_total(routes, coords, metric="euclidienne"):
                 dist = abs(x1 - x2) + abs(y1 - y2)
             else: 
                 dist = math.hypot(x1 - x2, y1 - y2)
-            total += dist
+            total += dist * fact  # Appliquer le facteur de trafic réel
             i += 1
     return total
 
@@ -428,7 +402,22 @@ def shaw_removal(routes, coords, q=2, metric="euclidienne"):
                 pool.append(route[i])
 
     if not pool or q <= 0:
-        return [rt[:] for rt in routes], []
+        routes_copy = []
+        i = 0
+        while i < len(routes):
+            # copie d'une route
+            route_originale = routes[i]
+            
+            route_copie = []
+            j = 0
+            while j < len(route_originale):
+                route_copie.append(route_originale[j])
+                j += 1
+            
+            routes_copy.append(route_copie)
+            i += 1
+
+        return routes_copy, []
 
     # Choisir un client de départ aléatoirement
     seed_client = random.choice(pool)
@@ -550,10 +539,11 @@ def reparation_greedy(routes_partial, removed, coords, metric="manhattan",
         # Appliquer l’insertion optimale
         r, i = choix_best
         routes_modifiees[r].insert(i + 1, node)
-        delta_total += (0.0 if delta_best is None else delta_best)
-
+        if delta_best is None:
+            delta_total += 0.0
+        else:
+            delta_total += delta_best
     return routes_modifiees, non_inseres, delta_total
-
 
 def best_reparation(routes_partial, removed, coords, metric="manhattan",
                 demandes=None, capacite=None, contraintes=None, ordre="sorted_by_cost"):
@@ -634,7 +624,11 @@ def regret_reparation(routes_partial, removed, coords, metric="manhattan",
                 regret = insertion_costs[regret_level - 1][0] - insertion_costs[0][0]
             else:
                 # Si moins de positions que regret_level, utiliser la différence max
-                regret = insertion_costs[-1][0] - insertion_costs[0][0] if len(insertion_costs) > 1 else insertion_costs[0][0]
+                if len(insertion_costs) > 1:
+                    regret = insertion_costs[-1][0] - insertion_costs[0][0]
+                else:
+                    regret = insertion_costs[0][0]
+
             
             # Garder le client avec le plus grand regret
             if regret > best_regret:
@@ -780,8 +774,8 @@ def init_scores_et_param(remove_ops, insert_ops):
             "improve": 25.0,     
             "accepted_worse": 3.0
         },
-        "rho": 0.6,          # Apprentissage plus rapide (0.5 -> 0.6)
-        "segment_len": 30,   # Segments plus courts pour adaptation plus rapide (50 -> 30)
+        "rho": 0.65,
+        "segment_len": 25,
         "iters_in_segment": 0
     }
 
@@ -792,7 +786,7 @@ def init_scores_et_param(remove_ops, insert_ops):
 
     params = {
         "accept_mode": "sa",  
-        "alpha": 0.992,       # Refroidissement plus rapide (0.9995 -> 0.992)
+        "alpha": 0.996,
         "epsilon": 0.0 
     }
 
@@ -870,7 +864,7 @@ def alns(initial_routes, coords,
     # Init scores & params
     scores, params = init_scores_et_param(remove_ops, insert_ops)
 
-    # Température initiale
+    # Température initiale élevée mais optimisée pour convergence rapide
     T = 200.0 
 
     # État courant
@@ -943,63 +937,70 @@ def alns(initial_routes, coords,
 def gap(cout, fichier_vrp):
     """
     Calcule l'écart (en %) entre un coût courant et le coût optimal indiqué
-    dans le fichier .sol correspondant (même nom que le .vrp, extension .sol).
+    dans le fichier .sol correspondant en utilisant vrplib.read_solution.
     Retourne un float (pourcentage) ou None si le .sol est introuvable ou illisible.
     """
     try:
         # Construire le chemin vers le fichier .sol
-        nom_fichier = os.path.basename(fichier_vrp)  # ex: "A-n32-k5.vrp"
-        base, _ = os.path.splitext(nom_fichier)       # ex: "A-n32-k5"
-        sol_path = os.path.join("data", base + ".sol")  # ex: "data/A-n32-k5.sol"
+        nom_fichier = os.path.basename(fichier_vrp)
+        base, _ = os.path.splitext(nom_fichier)
+        sol_path = os.path.join("data", base + ".sol")
         
-        with open(sol_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("Cost"):
-                    # Extraire le nombre après "Cost"
-                    # Format attendu: "Cost 784" ou "Cost: 784"
-                    parts = line.replace(":", "").split()
-                    if len(parts) >= 2:
-                        try:
-                            opt = float(parts[1])
-                            if opt == 0:
-                                return None
-                            return 100.0 * (cout - opt) / opt
-                        except ValueError:
-                            continue
-        return None
+        # Utiliser vrplib pour lire la solution
+        solution = vrplib.read_solution(sol_path)
+        opt_cost = solution["cost"]
+        
+        if opt_cost == 0:
+            return None
+        
+        return 100.0 * (cout - opt_cost) / opt_cost
+        
     except FileNotFoundError:
         print(f"Fichier .sol non trouvé: {sol_path}")
         return None
     except Exception as e:
-        print(f"Erreur lors de la lecture du fichier .sol: {e}")
+        print(f"Erreur lors de la lecture du fichier .sol avec vrplib: {e}")
         return None
 
-def tracer_vrp(fichier, routes=None, titre="Clients et Dépôts"):
-    coords = lire_coordonnees(fichier)
-    depots = lire_depots(fichier)
-
-    # Séparer clients
+def tracer_vrp(instance, routes=None, titre="Clients et Dépôts"):
+    """
+    Trace les clients, dépôts et routes en utilisant les données VRPLib.
+    """
+    coords = instance["node_coord"]  # Numpy array (n, 2)
+    depot = instance["depot"][0]     # Index du dépôt
+    n = instance["dimension"]        # Nombre de nœuds
+    
+   # Séparer clients et dépôts
     clients = []
-    for i in coords.keys():
-        est_depot = False
-        for d in depots:
-            if i == d:
-                est_depot = True
-                break
-        if not est_depot:
+    i = 0
+    while i < n:
+        if i != depot:
             clients.append(i)
+        i += 1
 
-    # Points
-    x_clients, y_clients = [], []
-    for cid in clients:
-        x, y = coords[cid]
-        x_clients.append(x); y_clients.append(y)
+    depots = [depot]
 
-    x_depots, y_depots = [], []
-    for did in depots:
-        x, y = coords[did]
-        x_depots.append(x); y_depots.append(y)
+    # Points clients
+    x_clients = []
+    y_clients = []
+
+    i = 0
+    while i < len(clients):
+        cid = clients[i]
+        x_clients.append(coords[cid][0])
+        y_clients.append(coords[cid][1])
+        i += 1
+
+    # Points dépôts
+    x_depots = []
+    y_depots = []
+
+    i = 0
+    while i < len(depots):
+        did = depots[i]
+        x_depots.append(coords[did][0])
+        y_depots.append(coords[did][1])
+        i += 1
 
     # Plot
     plt.figure()
@@ -1007,7 +1008,8 @@ def tracer_vrp(fichier, routes=None, titre="Clients et Dépôts"):
     plt.scatter(x_depots, y_depots, c='red', marker='s', s=120, label='Dépôts')
 
     # Labels
-    for i, (x, y) in coords.items():
+    for i in range(n):
+        x, y = coords[i]
         plt.text(x + 0.5, y + 0.5, str(i), fontsize=8, color="black")
 
     # Routes : couleur différente par route
@@ -1031,7 +1033,6 @@ def tracer_vrp(fichier, routes=None, titre="Clients et Dépôts"):
                 i += 1
 
     plt.title(titre)
-    
     plt.xlabel("X")
     plt.ylabel("Y")
     plt.legend()
@@ -1039,9 +1040,10 @@ def tracer_vrp(fichier, routes=None, titre="Clients et Dépôts"):
     plt.grid(True)
     plt.show()
 
-coords = lire_coordonnees(choix_fichier)
-routes = solution_initiale(choix_fichier)
-tracer_vrp(choix_fichier, routes, titre="Solution Initiale VRP")
+# Utilisation des données VRPLib
+coords = get_coords_dict(instance)
+routes = solution_initiale(instance)
+tracer_vrp(instance, routes, titre="Solution Initiale VRP")
 print("cout total de la solution initiale :", cout_total(routes, coords, metric="manhattan"))
 
 # ALNS
@@ -1051,14 +1053,14 @@ state_final = alns(
     initial_routes=routes,
     coords=coords,
     metric="euclidienne", 
-    n_iter=3500, 
-    q_remove=6,   
-    demandes=lire_demandes(choix_fichier),
-    capacite=lire_capacite(choix_fichier),
+    n_iter=1500, 
+    q_remove=7,
+    demandes=get_demands_dict(instance),
+    capacite=instance["capacity"],
     contraintes=None,
     seed=42,
-    log=500,
-    max_time=360    
+    log=100,
+    max_time=300 
 )
 
 print("Coût final       :", state_final["C"])
@@ -1070,4 +1072,4 @@ print("Temps d'exécution :", fin - debut, "secondes")
 current, peak = tracemalloc.get_traced_memory()
 print(f"Mémoire actuelle : {current / 1024:.2f} Ko")
 
-tracer_vrp(choix_fichier, state_final["S_best"], titre="ALNS: meilleure solution")
+tracer_vrp(instance, state_final["S_best"], titre="ALNS: meilleure solution")
