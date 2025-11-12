@@ -60,48 +60,50 @@ else:
 
     print("Mode 1 (contraintes supplémentaires) :")
     choix1 = None
-    while choix1 != 0 and choix1 != 1 and choix1 != 2:
-        try:
-            print("Choisissez la contrainte :")
-            print("0 -> Contraintes fenetre de temps")
-            print("1 -> Contraintes facteur de traffic")
-            print("2 -> Les deux contraintes")
-            choix1 = int(input("Votre choix (0, 1 ou 2) : "))
-            if choix1 != 0 and choix1 != 1 and choix1 != 2:
-                print("Erreur : veuillez entrer 0, 1 ou 2.")
+    
+    print(f"Contrainte sélectionnée : facteur de traffic temporelle")
+    a = 0.15
+    b = 4.0  # Coefficients BPR standards
+    V = 0  # Volume de trafic typique (vehicules par heure) initiée a 0 en France
+    C = 3200  # Capacité de la route typique (véhicule par heure) en France
 
-        except ValueError:
-            print(" Entrée invalide : veuillez entrer un nombre entier (0, 1 ou 2).")
+    choix2 = int(input("Choisissez la méthode de récupération de l'heure 0.Heure actuelle, 1.Entrée Manuel : "))
 
-    print(f"Contrainte sélectionnée : {choix1}")
-    choix2 = int(input("Choisissez le mode de trafic 0.Automatique, 1.Manuel : "))
     if choix2 == 0:
+
         """Retourne un facteur de trafic temporelle en fonction de l'heure de la journée"""
         now = datetime.now()
         h = now.hour
-        if 7 <= h < 9:
-            fact = 1.3  # Heure de pointe du matin
-        elif 9 <= h < 16:
-            fact = 1.0  # Heure normale de l'après-midi
-        elif 17 <= h < 20:
-            fact =  1.8  # Heure de pointe du soir
-        else:
-            fact = 0.8  # Autres heures
+        
     else:
     
         """Retourne un facteur de trafic temporelle entré manuellement par l'utilisateur"""
-
         h = int(input("Entrez l'heure (0-23) : "))
-        if 7 <= h < 9:
-            fact = 1.3  # Heure de pointe du matin
-        elif 9 <= h < 16:
-            fact = 1.0  # Heure normale de l'après-midi
-        elif 17 <= h < 20:
-            fact = 1.8  # Heure de pointe du soir
-        else:
-            fact = 0.8  # Autres heures
 
+    if 0 <= h < 5:
+        V = 600          # très faible
+    elif 5 <= h < 7:
+        V = 2000         # montée progressive
+    elif 7 <= h < 9:
+        V = 5500         # pointe matin
+    elif 9 <= h < 12:
+        V = 3500         # trafic fort mais fluide
+    elif 12 <= h < 14:
+        V = 4000         # pic de midi
+    elif 14 <= h < 16:
+        V = 3000         # reflux
+    elif 16 <= h < 19:
+        V = 6000         # pointe du soir
+    elif 19 <= h < 22:
+        V = 3000         # descente
+    elif 22 <= h < 24:
+        V = 1200         # nuit
+    else:
+        raise ValueError("Heure invalide, doit être comprise entre 0 et 23.")
+    
+    fact = (1 + a * (V / C) ** b) # Calcul du facteur de trafic formule BPR
 
+        
     fichiers_vrp = glob.glob(os.path.join(dossier, "*.vrp"))
     if not fichiers_vrp:
         print("Aucun fichier .vrp trouvé dans le dossier data/")
