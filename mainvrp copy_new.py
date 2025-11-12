@@ -948,7 +948,7 @@ def gap(cout, fichier_vrp):
         
         # Utiliser vrplib pour lire la solution
         solution = vrplib.read_solution(sol_path)
-        opt_cost = solution["cost"]
+        opt_cost = solution["cost"] * fact  # Appliquer le facteur de trafic
         
         if opt_cost == 0:
             return None
