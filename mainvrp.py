@@ -150,18 +150,6 @@ def selection_op(scores):
     """
     Sélectionne un opérateur de destruction et un opérateur de réparation 
     via un tirage à la roulette pondérée.
-    
-    Paramètres
-    ----------
-    w_remove : dict
-        Exemple : {"random": 1, "worst": 1}
-    poids_reparation : dict
-        Exemple : {"greedy": 1, "best": 1}
-
-    Retour
-    ------
-    op_destruct : str
-    op_repare : str
     """
     # Tables de poids
     w_remove = {}
@@ -656,7 +644,7 @@ def appli_acceptation(state, candidate, selected_ops, T, params, scores):
     else:
         outcome = "accepted_worse"
 
-    # Créditer opérateurs (score + uses) - remove ET insert
+    # Créditer opérateurs (score + uses) - remove et insert
     pi = scores["pi"]
     credit = pi.get(outcome, 0.0)
     scores["remove"][op_remove]["score"] += credit
@@ -667,7 +655,7 @@ def appli_acceptation(state, candidate, selected_ops, T, params, scores):
     # Refroidissement éventuel
     T = refroidissement(T, params)
 
-    # Mise à jour par segment (incrément du compteur + éventuel update des poids)
+    # Mise à jour par segment
     scores["iters_in_segment"] += 1
     if scores["iters_in_segment"] >= scores["segment_len"]:
         rho = scores["rho"]
@@ -856,8 +844,6 @@ def alns(initial_routes, coords,
             print(f"[ALNS] it={it:5d} | destroy={op_remove:7s} | repair={op_insert:7s} | outcome={outcome:15s} | C={state['C']:.2f} | C*={state['C_best']:.2f} | T={T:.4f}")
 
         it += 1
-
-    # 6) Retour
     return state, couts_log
 
 def gap(cout, fichier_vrp):
