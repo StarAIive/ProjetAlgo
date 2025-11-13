@@ -1,0 +1,126 @@
+{
+    "1": {
+        "role": "COLLECTE",
+        "type": 1
+    },
+    "2": {
+        "role": "COLLECTE",
+        "type": 2
+    },
+    "3": {
+        "role": "COLLECTE",
+        "type": 3
+    },
+    "4": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "5": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "6": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "7": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "8": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "9": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "10": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "11": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "12": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "13": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "14": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "15": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "16": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "17": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "18": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "19": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "20": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "21": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "22": {
+        "role": "CLIENT",
+        "type": 2
+    },
+    "23": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "24": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "25": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "26": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "27": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "28": {
+        "role": "CLIENT",
+        "type": 3
+    },
+    "29": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "30": {
+        "role": "CLIENT",
+        "type": 1
+    },
+    "31": {
+        "role": "CLIENT",
+        "type": 3
+    }
+}
