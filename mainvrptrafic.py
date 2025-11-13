@@ -6,8 +6,14 @@ import random
 import time
 import tracemalloc
 import vrplib
+from datetime import datetime
+
+# MENU PRINCIPAL
 
 choix = None
+dossier = "data"
+fact = 1.0  # Facteur de trafic par défaut
+
 while choix != 0 and choix != 1:
     try:
         print("Choisissez le mode de test :")
@@ -22,11 +28,10 @@ while choix != 0 and choix != 1:
 print(f"Mode sélectionné : {choix}")
 
 if choix == 0:
-    
-    dossier1 = "data"
-    fichiers_vrp = glob.glob(os.path.join(dossier1, "*.vrp"))
+    dossier = "data"
+    fichiers_vrp = glob.glob(os.path.join(dossier, "*.vrp"))
     if not fichiers_vrp:
-        print("Aucun fichier .vrp trouvé dans les dossier data/")
+        print("Aucun fichier .vrp trouvé dans le dossier data/")
         raise SystemExit
 
     print("Fichiers .vrp disponibles :")
@@ -52,36 +57,77 @@ if choix == 0:
     instance = vrplib.read_instance(choix_fichier)
     print(f"Instance chargée : {instance['dimension']} nœuds, capacité {instance['capacity']}")
 else:
+
+    print("Mode 1 (contraintes supplémentaires) :")
+    choix1 = None
+    while choix1 != 0 and choix1 != 1 and choix1 != 2:
+        try:
+            print("Choisissez la contrainte :")
+            print("0 -> Contraintes fenetre de temps")
+            print("1 -> Contraintes facteur de traffic")
+            print("2 -> Les deux contraintes")
+            choix1 = int(input("Votre choix (0, 1 ou 2) : "))
+            if choix1 != 0 and choix1 != 1 and choix1 != 2:
+                print("Erreur : veuillez entrer 0, 1 ou 2.")
+
+        except ValueError:
+            print(" Entrée invalide : veuillez entrer un nombre entier (0, 1 ou 2).")
+
+    print(f"Contrainte sélectionnée : {choix1}")
+    choix2 = int(input("Choisissez le mode de trafic 0.Automatique, 1.Manuel : "))
+    if choix2 == 0:
+        """Retourne un facteur de trafic temporelle en fonction de l'heure de la journée"""
+        now = datetime.now()
+        h = now.hour
+        if 7 <= h < 9:
+            fact = 1.3  # Heure de pointe du matin
+        elif 9 <= h < 16:
+            fact = 1.0  # Heure normale de l'après-midi
+        elif 17 <= h < 20:
+            fact =  1.8  # Heure de pointe du soir
+        else:
+            fact = 0.8  # Autres heures
+    else:
     
-    dossier2 = "data2"
-    fichiers_txt = glob.glob(os.path.join(dossier2, "*.vrp"))
-    if not fichiers_txt:
-        print("Aucun fichier .vrp trouvé dans le dossier data2/")
+        """Retourne un facteur de trafic temporelle entré manuellement par l'utilisateur"""
+
+        h = int(input("Entrez l'heure (0-23) : "))
+        if 7 <= h < 9:
+            fact = 1.3  # Heure de pointe du matin
+        elif 9 <= h < 16:
+            fact = 1.0  # Heure normale de l'après-midi
+        elif 17 <= h < 20:
+            fact = 1.8  # Heure de pointe du soir
+        else:
+            fact = 0.8  # Autres heures
+
+
+    fichiers_vrp = glob.glob(os.path.join(dossier, "*.vrp"))
+    if not fichiers_vrp:
+        print("Aucun fichier .vrp trouvé dans le dossier data/")
         raise SystemExit
 
-    print("Fichiers VRP/TW disponibles :")
-    for idx, fp in enumerate(fichiers_txt, start=1):
+    print("Fichiers .vrp disponibles :")
+    idx = 1
+    for fp in fichiers_vrp:
         print(f"{idx} - {os.path.basename(fp)}")
+        idx += 1
 
     while True:
         try:
-            k = int(input(f"\nChoisissez un fichier (1-{len(fichiers_txt)}) : "))
-            if 1 <= k <= len(fichiers_txt):
-                choix_fichier = fichiers_txt[k - 1]
+            k = int(input(f"\nChoisissez un fichier (1-{len(fichiers_vrp)}) : "))
+            if 1 <= k <= len(fichiers_vrp):
+                choix_fichier = fichiers_vrp[k - 1]
                 nom_fichier = os.path.basename(choix_fichier)
                 break
             else:
-                print(f"Erreur : veuillez entrer un nombre entre 1 et {len(fichiers_txt)}")
+                print(f"Erreur : veuillez entrer un nombre entre 1 et {len(fichiers_vrp)}")
         except ValueError:
             print("Erreur : veuillez entrer un nombre valide")
-    print(f"\nFichier sélectionné : {nom_fichier}")
-
+        
+    # Charger l'instance VRP avec vrplib
     instance = vrplib.read_instance(choix_fichier)
-    print(f"Instance chargée (mode 1) : {instance['dimension']} nœuds, capacité {instance['capacity']}")
-
-    # verifier s'il ya bien les fenetres de temps dans le fichier
-    if "time_window" not in instance:
-        print("Le fichier ne contient pas de 'time_window' dans l'instance VRPLib.")
+    print(f"Instance chargée : {instance['dimension']} nœuds, capacité {instance['capacity']}")
 
 # Fonctions utilisant VRPLib remplacent les anciennes fonctions de lecture
 def get_coords_dict(instance):
@@ -170,7 +216,7 @@ def cout_total(routes, coords, metric="euclidienne"):
                 dist = abs(x1 - x2) + abs(y1 - y2)
             else: 
                 dist = math.hypot(x1 - x2, y1 - y2)
-            total += dist
+            total += dist * fact  # Appliquer le facteur de trafic réel
             i += 1
     return total
 
@@ -426,96 +472,23 @@ def delta_insertion(route, idx, node, coords, metric="manhattan"):
 
     return delta
 
-def simulate_route_with_tw(route, coords, metric, time_windows, service_times):
+
+def insertion_faisable(route, idx, node, demandes=None, capacite=None, contraintes=None):
     """
-    Simule le passage sur toute la route en respectant les fenêtres de temps.
-    route : liste de noeuds (ex: [0, 5, 7, 0])
-    time_windows : dict {node: (e_i, l_i)}
-    service_times : dict {node: s_i}
-    Retourne True si toute la route respecte les TW, sinon False.
+    Faisabilité minimale : capacité par route (les dépôts sont aux extrémités).
     """
-    # temps courant au dépôt = 0
-    current_time = 0.0
-
-    for i in range(len(route)):
-        node = route[i]
-
-        # distance depuis le précédent
-        if i > 0:
-            prev = route[i - 1]
-            x1, y1 = coords[prev]
-            x2, y2 = coords[node]
-            if metric == "manhattan":
-                travel = abs(x1 - x2) + abs(y1 - y2)
-            else:
-                travel = math.hypot(x1 - x2, y1 - y2)
-            current_time += travel
-
-        # fenêtre de temps du noeud
-        e_i, l_i = time_windows.get(node, (0.0, float("inf")))
-        s_i = service_times.get(node, 0.0)
-
-        # si on arrive trop tôt, on attend
-        if current_time < e_i:
-            current_time = e_i
-
-        # si on arrive après la fin de fenêtre -> infeasible
-        if current_time > l_i:
-            return False
-
-        # on fait le service
-        current_time += s_i
-
-    return True
-
-
-
-def insertion_faisable(route, idx, node,
-                       demandes=None, capacite=None,
-                       contraintes=None,
-                       coords=None, metric="manhattan"):
-    """
-    Vérifie si on peut insérer `node` entre route[idx] et route[idx+1]
-    en respectant :
-      - la capacité (déjà dans ton code)
-      - éventuellement les fenêtres de temps (quand elles sont fournies)
-    """
-    # 1) Vérif capacité (ton code d'origine)
     if demandes is not None and capacite is not None:
         charge = 0
-        # on recalcule la charge actuelle de la route
-        for i in range(1, len(route) - 1):  # on ignore les dépôts aux extrémités
+        i = 1
+        while i < len(route) - 1:  # ignorer dépôts
             client = route[i]
             charge += demandes.get(client, 0)
-        # on ajoute le client qu'on veut insérer
+            i += 1
         charge += demandes.get(node, 0)
         if charge > capacite:
             return False
 
-    # 2) Vérif fenêtres de temps si on en a
-    if contraintes is not None and "time_windows" in contraintes:
-        time_windows = contraintes.get("time_windows", {})
-        service_times = contraintes.get("service_times", {})
-
-        # on construit la route telle qu'elle serait après insertion
-        new_route = route[:idx + 1] + [node] + route[idx + 1:]
-
-        # on doit avoir coords pour simuler
-        if coords is None:
-            # si pas de coords -> on ne peut pas vérifier, on dit juste OK
-            return True
-
-        ok = simulate_route_with_tw(
-            new_route,
-            coords,
-            metric,
-            time_windows,
-            service_times
-        )
-        if not ok:
-            return False
-
-    # si tout est bon
+    # (extensions TW/compatibilité plus tard via `contraintes`)
     return True
 
 
@@ -635,7 +608,7 @@ def regret_reparation(routes_partial, removed, coords, metric="manhattan",
             
             for r_idx, route in enumerate(routes_modifiees):
                 for i in range(len(route) - 1):
-                    if insertion_faisable(route, i, client, demandes=demandes, capacite=capacite, contraintes=contraintes, coords=coords, metric=metric):
+                    if insertion_faisable(route, i, client, demandes, capacite, contraintes):
                         delta = delta_insertion(route, i, client, coords, metric)
                         insertion_costs.append((delta, r_idx, i))
             
@@ -1073,49 +1046,21 @@ routes = solution_initiale(instance)
 tracer_vrp(instance, routes, titre="Solution Initiale VRP")
 print("cout total de la solution initiale :", cout_total(routes, coords, metric="manhattan"))
 
-time_windows = {}
-service_times = {}
-
-n = instance["dimension"]
-tw_array = instance.get("time_window", None)
-st_array = instance.get("service_time", None)
-
-for i in range(n):
-    if tw_array is not None:
-        e_i = float(tw_array[i][0])
-        l_i = float(tw_array[i][1])
-    else:
-        e_i, l_i = 0.0, float("inf")
-    time_windows[i] = (e_i, l_i)
-
-    if st_array is not None:
-        s_i = float(st_array[i])
-    else:
-        s_i = 0.0
-    service_times[i] = s_i
-
-# (optionnel) pour vérifier :
-print(time_windows)
-print(service_times)
-
 # ALNS
 debut = time.perf_counter()
 tracemalloc.start()
 state_final = alns(
     initial_routes=routes,
     coords=coords,
-    metric="euclidienne",
-    n_iter=1500,
+    metric="euclidienne", 
+    n_iter=1500, 
     q_remove=7,
     demandes=get_demands_dict(instance),
     capacite=instance["capacity"],
-    contraintes={
-        "time_windows": time_windows,
-        "service_times": service_times
-    },
+    contraintes=None,
     seed=42,
     log=100,
-    max_time=300
+    max_time=300 
 )
 
 print("Coût final       :", state_final["C"])
