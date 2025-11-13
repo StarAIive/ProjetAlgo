@@ -692,12 +692,12 @@ def init_scores_et_param(remove_ops, insert_ops):
         "remove": {},
         "insert": {},
         "pi": {  
-            "best_global": 50.0,  
-            "improve": 25.0,     
-            "accepted_worse": 3.0
+            "best_global": 50.0,   # bonne récompense pour une nouvelle meilleure solution
+            "improve": 20.0,       # récompense correcte pour une amélioration
+            "accepted_worse": 5.0  # petite récompense pour la diversification
         },
-        "rho": 0.65,
-        "segment_len": 25,
+        "rho": 0.5,               # apprentissage moins brutal des poids
+        "segment_len": 10,        # on évalue les opérateurs sur des segments plus longs
         "iters_in_segment": 0
     }
 
@@ -708,7 +708,7 @@ def init_scores_et_param(remove_ops, insert_ops):
 
     params = {
         "accept_mode": "sa",  
-        "alpha": 0.996,
+        "alpha": 0.999,       # refroidissement assez lent pour bien explorer sur ~80 s
     }
 
     return scores, params
@@ -786,8 +786,16 @@ def alns(initial_routes, coords,
     # Init scores & params
     scores, params = init_scores_et_param(remove_ops, insert_ops)
 
-    # Température initiale élevée mais optimisée pour convergence rapide
-    T = 200.0 
+    # Température initiale adaptée à la taille de l'instance
+    n_clients = len([i for i in range(len(coords)) if i != 0])  # Nombre de clients
+    if n_clients <= 50:
+        T = 80.0 
+    elif n_clients <= 100:
+        T = 100.0 
+    elif n_clients <= 200:
+        T = 120.0 
+    else:
+        T = 150.0     
 
     # État courant
     S0 = []
@@ -839,7 +847,7 @@ def alns(initial_routes, coords,
         # Vérification du temps limite
         if max_time is not None and time.perf_counter() - start_time > max_time:
             print(f"Temps maximum écoulé ({max_time}s). Arrêt de l'ALNS.")
-            return state
+            return state, couts_log
         # Analyse statistique
         couts_log.append(state["C"])
 
@@ -1013,6 +1021,7 @@ coords = get_coords_dict(instance)
 # Boucle principale pour permettre plusieurs exécutions
 continuer = True
 state_log = []
+r=0
 while continuer:
     routes = solution_initiale(instance)
     tracer_vrp(instance, routes, titre="Solution Initiale VRP")
@@ -1021,18 +1030,39 @@ while continuer:
     # ALNS
     debut = time.perf_counter()
     tracemalloc.start()
+    # Paramètres adaptatifs selon la taille de l'instance
+    n_clients = instance['dimension'] - 1  # Nombre de clients (sans le dépôt)
+    
+    if n_clients <= 50:
+        n_iter = 800
+        q_remove = 5
+        max_time = 40
+    elif n_clients <= 100:
+        n_iter = 1200
+        q_remove = 7
+        max_time = 300
+    elif n_clients <= 200:
+        n_iter = 1500
+        q_remove = 9
+        max_time = 300
+    else:
+        n_iter = 3000
+        q_remove = 12
+        max_time = 300
+
+
     state_final, couts_log = alns(
         initial_routes=routes,
         coords=coords,
         metric="euclidienne", 
-        n_iter=1500, 
-        q_remove=7,
+        n_iter=n_iter, 
+        q_remove=q_remove,
         demandes=get_demands_dict(instance),
         capacite=instance["capacity"],
         contraintes=None,
-        seed=42,
+        seed=None,
         log=100,
-        max_time=300,
+        max_time=max_time,
         couts_log=[]
     )
 
@@ -1053,9 +1083,11 @@ while continuer:
     print("\n")
     while True:
         try:
+            print("Nombre de run actuel :", r+1)
             reponse = input("Voulez-vous faire une nouvelle exécution de l'algorithme ? (o/n) : ").lower().strip()
             if reponse in ['o', 'oui', 'y', 'yes']:
                 continuer = True
+                r+=1
                 break
             elif reponse in ['n', 'non', 'no']:
                 continuer = False
